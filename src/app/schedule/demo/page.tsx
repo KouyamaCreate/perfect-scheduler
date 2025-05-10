@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { useSearchParams } from 'next/navigation';
@@ -24,13 +24,21 @@ export default function ScheduleDemo() {
     const [shareLink, setShareLink] = useState('');
     const [copied, setCopied] = useState(false);
 
-    // 日付の配列を生成（開始日から終了日まで）
-    const dates = getDatesInRange(startDate, endDate);
+    // 選択モード（デフォルトはWhen2Meetと同じく範囲選択）
+    const [selectionType, setSelectionType] = useState<'path' | 'area'>('area');
 
-    // 時間スロットの配列を生成
+    // 選択操作のための状態変数
+    const [isSelecting, setIsSelecting] = useState(false);
+    const [selectionStartPoint, setSelectionStartPoint] = useState<{ dateIndex: number, timeIndex: number } | null>(null);
+    const [selectionCurrentPoint, setSelectionCurrentPoint] = useState<{ dateIndex: number, timeIndex: number } | null>(null);
+    const [isAdding, setIsAdding] = useState(true);
+    const [dragStarted, setDragStarted] = useState(false);
+
+    // 日付と時間スロットの配列を生成
+    const dates = getDatesInRange(startDate, endDate);
     const timeSlots = getTimeSlots(startTime, endTime, duration);
 
-    // 参加者を追加する機能
+    // 参加者を追加する
     const handleAddParticipant = (e: React.FormEvent) => {
         e.preventDefault();
         if (!username || selectedSlots.length === 0) return;
@@ -44,15 +52,145 @@ export default function ScheduleDemo() {
         setSelectedSlots([]);
     };
 
-    // 時間スロットの選択状態を切り替える
-    const toggleTimeSlot = (dateIndex: number, timeIndex: number) => {
+    // セルをクリックした時の処理（選択開始）
+    const handleCellMouseDown = (dateIndex: number, timeIndex: number, e: React.MouseEvent) => {
+        e.preventDefault();
+
         const slotId = `${dateIndex}-${timeIndex}`;
-        if (selectedSlots.includes(slotId)) {
-            setSelectedSlots(selectedSlots.filter(id => id !== slotId));
-        } else {
-            setSelectedSlots([...selectedSlots, slotId]);
+        const isSelected = selectedSlots.includes(slotId);
+
+        // 追加モード or 削除モードを決定
+        setIsAdding(!isSelected);
+
+        // 選択操作の開始ポイントを記録
+        setSelectionStartPoint({ dateIndex, timeIndex });
+        setSelectionCurrentPoint({ dateIndex, timeIndex });
+
+        // 選択中状態に設定
+        setIsSelecting(true);
+        setDragStarted(false);
+
+        // 単一セル選択の場合はここですぐに選択状態を変更
+        if (selectionType === 'path') {
+            toggleCellSelection(dateIndex, timeIndex);
         }
+
+        // マウスアップイベントをwindowに設定
+        window.addEventListener('mouseup', handleMouseUp);
+        window.addEventListener('mousemove', handleGlobalMouseMove);
     };
+
+    // マウス移動時の処理（セル上）
+    const handleCellMouseEnter = (dateIndex: number, timeIndex: number, e: React.MouseEvent) => {
+        if (!isSelecting) return;
+
+        // ドラッグ開始フラグを立てる
+        setDragStarted(true);
+
+        // 現在位置を更新
+        setSelectionCurrentPoint({ dateIndex, timeIndex });
+    };
+
+    // グローバルなマウス移動の検知（セル外でのドラッグにも対応）
+    const handleGlobalMouseMove = (e: MouseEvent) => {
+        if (!isSelecting) return;
+
+        // マウスが移動したらドラッグ開始とみなす
+        setDragStarted(true);
+    };
+
+    // マウスを離した時の処理
+    const handleMouseUp = (e: MouseEvent) => {
+        e.preventDefault();
+
+        if (isSelecting) {
+            // ドラッグしていなかった場合は1マスだけの選択/解除
+            if (!dragStarted && selectionStartPoint) {
+                const { dateIndex, timeIndex } = selectionStartPoint;
+                toggleCellSelection(dateIndex, timeIndex);
+            }
+            // ドラッグしていた場合は範囲選択を確定（既に更新済みなので特に何もしない）
+        }
+
+        // 選択操作の終了
+        setIsSelecting(false);
+        setSelectionStartPoint(null);
+        setSelectionCurrentPoint(null);
+
+        // イベントリスナーを削除
+        window.removeEventListener('mouseup', handleMouseUp);
+        window.removeEventListener('mousemove', handleGlobalMouseMove);
+    };
+
+    // セルの選択状態をトグルする
+    const toggleCellSelection = (dateIndex: number, timeIndex: number) => {
+        const slotId = `${dateIndex}-${timeIndex}`;
+
+        setSelectedSlots(prev => {
+            if (prev.includes(slotId)) {
+                return prev.filter(id => id !== slotId);
+            } else {
+                return [...prev, slotId];
+            }
+        });
+    };
+
+    // 選択状態に基づいて表示を更新（選択中の範囲を含む）
+    const getCellStatus = (dateIndex: number, timeIndex: number) => {
+        const slotId = `${dateIndex}-${timeIndex}`;
+        const availability = getAvailability(participants, slotId);
+
+        // 通常の選択状態
+        const isSelected = selectedSlots.includes(slotId);
+
+        // 選択操作中かつ範囲選択モードの場合、選択範囲内かどうかをチェック
+        let isInActiveSelection = false;
+
+        if (isSelecting && dragStarted && selectionType === 'area' && selectionStartPoint && selectionCurrentPoint) {
+            const startDateIndex = Math.min(selectionStartPoint.dateIndex, selectionCurrentPoint.dateIndex);
+            const endDateIndex = Math.max(selectionStartPoint.dateIndex, selectionCurrentPoint.dateIndex);
+            const startTimeIndex = Math.min(selectionStartPoint.timeIndex, selectionCurrentPoint.timeIndex);
+            const endTimeIndex = Math.max(selectionStartPoint.timeIndex, selectionCurrentPoint.timeIndex);
+
+            if (dateIndex >= startDateIndex && dateIndex <= endDateIndex &&
+                timeIndex >= startTimeIndex && timeIndex <= endTimeIndex) {
+                isInActiveSelection = true;
+            }
+
+            // 範囲選択の処理（ドラッグ中に選択状態を更新）
+            if (isInActiveSelection && selectionCurrentPoint !== null) {
+                // 追加モードでは選択済みでなければ追加、削除モードでは選択済みなら削除
+                if (isAdding && !isSelected) {
+                    // 遅延なく追加するため、状態更新ではなく直接追加
+                    if (!selectedSlots.includes(slotId)) {
+                        setSelectedSlots(prev => [...prev, slotId]);
+                    }
+                } else if (!isAdding && isSelected) {
+                    setSelectedSlots(prev => prev.filter(id => id !== slotId));
+                }
+            }
+        }
+
+        return {
+            isSelected,
+            isInActiveSelection,
+            availability
+        };
+    };
+
+    // パス選択モードの場合の処理（なぞった部分を選択）
+    useEffect(() => {
+        if (isSelecting && dragStarted && selectionType === 'path' && selectionCurrentPoint) {
+            const { dateIndex, timeIndex } = selectionCurrentPoint;
+            const slotId = `${dateIndex}-${timeIndex}`;
+
+            if (isAdding && !selectedSlots.includes(slotId)) {
+                setSelectedSlots(prev => [...prev, slotId]);
+            } else if (!isAdding && selectedSlots.includes(slotId)) {
+                setSelectedSlots(prev => prev.filter(id => id !== slotId));
+            }
+        }
+    }, [selectionCurrentPoint, isSelecting, dragStarted, selectionType, isAdding, selectedSlots]);
 
     // シェアリンクをコピーする
     const copyShareLink = () => {
@@ -92,13 +230,52 @@ export default function ScheduleDemo() {
                     {description && <p className="opacity-80">{description}</p>}
                 </div>
 
+                <div className="mb-3 px-4 py-3 bg-[var(--secondary)] rounded-lg">
+                    <p className="font-medium">💡 アドバイス</p>
+                    <p className="text-sm opacity-80">時間枠をクリックして選択、またはドラッグして複数の時間をまとめて選択できます。</p>
+                </div>
+
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
                     {/* スケジュール表示部分 */}
                     <div className="md:col-span-2 overflow-x-auto">
-                        <h2 className="text-xl font-semibold mb-4">スケジュールを選択</h2>
-                        <div className="calendar-grid mb-4" style={{
-                            gridTemplateColumns: `auto ${dates.map(() => '1fr').join(' ')}`
-                        }}>
+                        <div className="flex justify-between items-center mb-4">
+                            <h2 className="text-xl font-semibold">スケジュールを選択</h2>
+
+                            {/* 選択モード切り替え */}
+                            <div className="flex items-center gap-4">
+                                <div className="flex items-center gap-1">
+                                    <input
+                                        type="radio"
+                                        id="areaMode"
+                                        name="selectionMode"
+                                        value="area"
+                                        checked={selectionType === 'area'}
+                                        onChange={() => setSelectionType('area')}
+                                        className="accent-[var(--primary)]"
+                                    />
+                                    <label htmlFor="areaMode" className="text-sm">範囲選択</label>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                    <input
+                                        type="radio"
+                                        id="pathMode"
+                                        name="selectionMode"
+                                        value="path"
+                                        checked={selectionType === 'path'}
+                                        onChange={() => setSelectionType('path')}
+                                        className="accent-[var(--primary)]"
+                                    />
+                                    <label htmlFor="pathMode" className="text-sm">なぞり選択</label>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div
+                            className="calendar-grid mb-4"
+                            style={{
+                                gridTemplateColumns: `auto ${dates.map(() => '1fr').join(' ')}`
+                            }}
+                        >
                             {/* 日付ヘッダー */}
                             <div className="p-2 font-bold border-b border-r border-[var(--border)]"></div>
                             {dates.map((date, index) => (
@@ -114,15 +291,31 @@ export default function ScheduleDemo() {
                                         {time}
                                     </div>
                                     {dates.map((_, dateIndex) => {
-                                        const slotId = `${dateIndex}-${timeIndex}`;
-                                        const isSelected = selectedSlots.includes(slotId);
-                                        const availability = getAvailability(participants, slotId);
+                                        const { isSelected, isInActiveSelection, availability } = getCellStatus(dateIndex, timeIndex);
+
+                                        const cellClassName = `
+                                            time-slot 
+                                            border-b 
+                                            border-r 
+                                            border-[var(--border)] 
+                                            ${isSelected ? 'selected' : ''} 
+                                            ${isInActiveSelection && dragStarted ? (isAdding ? 'active-selecting' : 'active-deselecting') : ''} 
+                                            ${availability > 0 ? (availability === participants.length ? 'available' : 'partially') : ''}
+                                            relative
+                                        `;
 
                                         return (
                                             <div
                                                 key={dateIndex}
-                                                className={`time-slot border-b border-r border-[var(--border)] ${isSelected ? 'selected' : ''} ${availability > 0 ? (availability === participants.length ? 'available' : 'partially') : ''}`}
-                                                onClick={() => toggleTimeSlot(dateIndex, timeIndex)}
+                                                className={cellClassName}
+                                                onMouseDown={(e) => handleCellMouseDown(dateIndex, timeIndex, e)}
+                                                onMouseEnter={(e) => handleCellMouseEnter(dateIndex, timeIndex, e)}
+                                                data-date-index={dateIndex}
+                                                data-time-index={timeIndex}
+                                                style={{
+                                                    userSelect: 'none',
+                                                    touchAction: 'none'
+                                                }}
                                             >
                                                 {availability > 0 && (
                                                     <div className="absolute inset-0 flex items-center justify-center text-xs font-bold">
@@ -245,6 +438,40 @@ export default function ScheduleDemo() {
                     </p>
                 </div>
             </footer>
+
+            <style jsx>{`
+                .calendar-grid {
+                    display: grid;
+                }
+                .time-slot {
+                    min-height: 2.5rem;
+                    cursor: pointer;
+                    transition: background-color 0.1s;
+                }
+                .time-slot.selected {
+                    background-color: var(--primary);
+                }
+                .time-slot.active-selecting {
+                    background-color: var(--primary);
+                    opacity: 0.7;
+                }
+                .time-slot.active-deselecting {
+                    background-color: transparent;
+                    opacity: 0.5;
+                }
+                .time-slot:hover {
+                    background-color: var(--secondary);
+                }
+                .time-slot.selected:hover {
+                    opacity: 0.9;
+                }
+                .time-slot.available {
+                    background-color: #22c55e;
+                }
+                .time-slot.partially {
+                    background-color: #eab308;
+                }
+            `}</style>
         </div>
     );
 }

@@ -24,6 +24,10 @@ export default function ScheduleDemo() {
     const [shareLink, setShareLink] = useState('');
     const [copied, setCopied] = useState(false);
 
+    // カラーカスタマイズ用の状態
+    const [minColor, setMinColor] = useState('#eab308'); // 少ない時の色（黄色）
+    const [maxColor, setMaxColor] = useState('#22c55e'); // 多い時の色（緑色）
+
     // 選択モード（デフォルトはWhen2Meetと同じく範囲選択）
     const [selectionType, setSelectionType] = useState<'path' | 'area'>('area');
 
@@ -139,6 +143,7 @@ export default function ScheduleDemo() {
     const getCellStatus = (dateIndex: number, timeIndex: number) => {
         const slotId = `${dateIndex}-${timeIndex}`;
         const availability = getAvailability(participants, slotId);
+        const availabilityRatio = participants.length > 0 ? availability / participants.length : 0;
 
         // 通常の選択状態
         const isSelected = selectedSlots.includes(slotId);
@@ -174,7 +179,8 @@ export default function ScheduleDemo() {
         return {
             isSelected,
             isInActiveSelection,
-            availability
+            availability,
+            availabilityRatio
         };
     };
 
@@ -291,7 +297,7 @@ export default function ScheduleDemo() {
                                         {time}
                                     </div>
                                     {dates.map((_, dateIndex) => {
-                                        const { isSelected, isInActiveSelection, availability } = getCellStatus(dateIndex, timeIndex);
+                                        const { isSelected, isInActiveSelection, availability, availabilityRatio } = getCellStatus(dateIndex, timeIndex);
 
                                         const cellClassName = `
                                             time-slot 
@@ -299,10 +305,41 @@ export default function ScheduleDemo() {
                                             border-r 
                                             border-[var(--border)] 
                                             ${isSelected ? 'selected' : ''} 
-                                            ${isInActiveSelection && dragStarted ? (isAdding ? 'active-selecting' : 'active-deselecting') : ''} 
+                                            ${isInActiveSelection && dragStarted ? (isAdding ? 'active-selecting' : 'active-deselecting') : ''}
                                             ${availability > 0 ? (availability === participants.length ? 'available' : 'partially') : ''}
                                             relative
                                         `;
+
+                                        // 参加可能人数に応じた色を計算
+                                        let availabilityColor = '';
+                                        if (availability > 0 && !isSelected && !isInActiveSelection) {
+                                            // 最大5段階のグラデーション
+                                            const maxSteps = Math.min(5, participants.length);
+
+                                            if (availability <= participants.length - maxSteps) {
+                                                // 下位の参加者は灰色
+                                                availabilityColor = '#9ca3af'; // グレー
+                                            } else {
+                                                // 上位5人（または全員）はグラデーション
+                                                // 参加者数 - availability が 0 の場合は最大色
+                                                // 参加者数 - availability が maxSteps - 1 の場合は最小色
+                                                const position = participants.length - availability;
+                                                const ratio = 1 - (position / (maxSteps - 1));
+
+                                                // カスタム色からRGB値を抽出
+                                                const minRgb = hexToRgb(minColor);
+                                                const maxRgb = hexToRgb(maxColor);
+
+                                                if (!minRgb || !maxRgb) {
+                                                    availabilityColor = maxColor; // フォールバック
+                                                } else {
+                                                    const r = Math.round(minRgb.r + (maxRgb.r - minRgb.r) * ratio);
+                                                    const g = Math.round(minRgb.g + (maxRgb.g - minRgb.g) * ratio);
+                                                    const b = Math.round(minRgb.b + (maxRgb.b - minRgb.b) * ratio);
+                                                    availabilityColor = `rgb(${r}, ${g}, ${b})`;
+                                                }
+                                            }
+                                        }
 
                                         return (
                                             <div
@@ -314,7 +351,11 @@ export default function ScheduleDemo() {
                                                 data-time-index={timeIndex}
                                                 style={{
                                                     userSelect: 'none',
-                                                    touchAction: 'none'
+                                                    touchAction: 'none',
+                                                    // 選択中のエレメントが必ず上に表示されるようにz-indexを設定
+                                                    zIndex: isSelecting && (isInActiveSelection || isSelected) ? 10 : 1,
+                                                    // 参加者の割合に応じた背景色を設定
+                                                    backgroundColor: availabilityColor || undefined
                                                 }}
                                             >
                                                 {availability > 0 && (
@@ -329,18 +370,42 @@ export default function ScheduleDemo() {
                             ))}
                         </div>
 
-                        <div className="flex items-center gap-4 mb-8">
+                        <div className="flex flex-wrap items-center gap-4 mb-8">
                             <div className="flex items-center gap-2">
                                 <div className="w-4 h-4 bg-[var(--primary)]"></div>
                                 <span className="text-sm">あなたの選択</span>
                             </div>
                             <div className="flex items-center gap-2">
-                                <div className="w-4 h-4 bg-[#22c55e]"></div>
-                                <span className="text-sm">全員参加可</span>
+                                <div className="w-4 h-4" style={{ backgroundColor: maxColor }}></div>
+                                <span className="text-sm">最大参加可能（5人または全員）</span>
+                                <input
+                                    type="color"
+                                    value={maxColor}
+                                    onChange={(e) => setMaxColor(e.target.value)}
+                                    className="w-6 h-6 cursor-pointer"
+                                    title="最大参加時の色を選択"
+                                />
                             </div>
                             <div className="flex items-center gap-2">
-                                <div className="w-4 h-4 bg-[#eab308]"></div>
-                                <span className="text-sm">一部参加可</span>
+                                <div className="w-10 h-4 bg-gradient-to-r" style={{
+                                    backgroundImage: `linear-gradient(to right, ${minColor}, ${maxColor})`
+                                }}></div>
+                                <span className="text-sm">参加可能人数（上位5人まで）</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <div className="w-4 h-4" style={{ backgroundColor: minColor }}></div>
+                                <span className="text-sm">最小参加（上位5人中の最下位）</span>
+                                <input
+                                    type="color"
+                                    value={minColor}
+                                    onChange={(e) => setMinColor(e.target.value)}
+                                    className="w-6 h-6 cursor-pointer"
+                                    title="最小参加時の色を選択"
+                                />
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <div className="w-4 h-4 bg-[#9ca3af]"></div>
+                                <span className="text-sm">下位の参加者（灰色）</span>
                             </div>
                         </div>
                     </div>
@@ -447,29 +512,28 @@ export default function ScheduleDemo() {
                     min-height: 2.5rem;
                     cursor: pointer;
                     transition: background-color 0.1s;
+                    position: relative;
                 }
                 .time-slot.selected {
-                    background-color: var(--primary);
+                    background-color: var(--primary) !important;
+                    z-index: 5;
                 }
                 .time-slot.active-selecting {
-                    background-color: var(--primary);
+                    background-color: var(--primary) !important;
                     opacity: 0.7;
+                    z-index: 10;
                 }
                 .time-slot.active-deselecting {
-                    background-color: transparent;
+                    background-color: transparent !important;
                     opacity: 0.5;
+                    z-index: 10;
                 }
                 .time-slot:hover {
                     background-color: var(--secondary);
+                    z-index: 3;
                 }
                 .time-slot.selected:hover {
                     opacity: 0.9;
-                }
-                .time-slot.available {
-                    background-color: #22c55e;
-                }
-                .time-slot.partially {
-                    background-color: #eab308;
                 }
             `}</style>
         </div>
@@ -519,4 +583,25 @@ function formatDate(date: Date): string {
 
 function getAvailability(participants: { name: string, slots: string[] }[], slotId: string): number {
     return participants.filter(p => p.slots.includes(slotId)).length;
+}
+
+// HEX色コードをRGB値に変換する関数
+function hexToRgb(hex: string): { r: number, g: number, b: number } | null {
+    // #で始まる場合は除去
+    hex = hex.replace(/^#/, '');
+
+    // 3桁の場合は6桁に変換（例：#f00 → #ff0000）
+    if (hex.length === 3) {
+        hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2];
+    }
+
+    // 16進数から10進数に変換
+    const result = /^([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result
+        ? {
+            r: parseInt(result[1], 16),
+            g: parseInt(result[2], 16),
+            b: parseInt(result[3], 16)
+        }
+        : null;
 }

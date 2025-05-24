@@ -1,7 +1,7 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import CreateSchedule from '@/app/create/page';
-import { doc, setDoc } from 'firebase/firestore';
+import { setDoc } from 'firebase/firestore';
 import { useRouter } from 'next/navigation';
 
 // next/navigationのモック

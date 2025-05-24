@@ -85,7 +85,7 @@ export default function ScheduleDemo() {
     };
 
     // マウス移動時の処理（セル上）
-    const handleCellMouseEnter = (dateIndex: number, timeIndex: number, _: React.MouseEvent) => {
+    const handleCellMouseEnter = (dateIndex: number, timeIndex: number) => {
         if (!isSelecting) return;
 
         // ドラッグ開始フラグを立てる
@@ -96,7 +96,7 @@ export default function ScheduleDemo() {
     };
 
     // グローバルなマウス移動の検知（セル外でのドラッグにも対応）
-    const handleGlobalMouseMove = (_: MouseEvent) => {
+    const handleGlobalMouseMove = () => {
         if (!isSelecting) return;
 
         // マウスが移動したらドラッグ開始とみなす
@@ -346,7 +346,7 @@ export default function ScheduleDemo() {
                                                 key={dateIndex}
                                                 className={cellClassName}
                                                 onMouseDown={(e) => handleCellMouseDown(dateIndex, timeIndex, e)}
-                                                onMouseEnter={(e) => handleCellMouseEnter(dateIndex, timeIndex, e)}
+                                                onMouseEnter={() => handleCellMouseEnter(dateIndex, timeIndex)}
                                                 data-date-index={dateIndex}
                                                 data-time-index={timeIndex}
                                                 style={{

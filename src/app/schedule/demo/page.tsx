@@ -1,11 +1,12 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { useSearchParams } from 'next/navigation';
 
-export default function ScheduleDemo() {
+// URLパラメータを取得するコンポーネント
+function ScheduleDemoContent() {
     const searchParams = useSearchParams();
 
     // URLからパラメータを取得
@@ -537,6 +538,15 @@ export default function ScheduleDemo() {
                 }
             `}</style>
         </div>
+    );
+}
+
+// メインコンポーネント
+export default function ScheduleDemo() {
+    return (
+        <Suspense fallback={<div className="container py-8">読み込み中...</div>}>
+            <ScheduleDemoContent />
+        </Suspense>
     );
 }
 

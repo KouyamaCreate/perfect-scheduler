@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { useParams } from 'next/navigation';
@@ -14,7 +14,16 @@ export default function SchedulePage() {
     // 状態管理
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
-    const [scheduleData, setScheduleData] = useState<any>(null);
+    const [scheduleData, setScheduleData] = useState<{
+        name: string;
+        description?: string;
+        startDate: string;
+        endDate: string;
+        startTime: string;
+        endTime: string;
+        duration: number;
+        createdAt: Date;
+    } | null>(null);
     const [username, setUsername] = useState('');
     const [selectedSlots, setSelectedSlots] = useState<string[]>([]);
     const [participants, setParticipants] = useState<{ name: string, slots: string[] }[]>([]);
@@ -43,7 +52,17 @@ export default function SchedulePage() {
                 const scheduleSnap = await getDoc(scheduleRef);
 
                 if (scheduleSnap.exists()) {
-                    setScheduleData(scheduleSnap.data());
+                    const data = scheduleSnap.data();
+                    setScheduleData({
+                        name: data.name,
+                        description: data.description,
+                        startDate: data.startDate,
+                        endDate: data.endDate,
+                        startTime: data.startTime,
+                        endTime: data.endTime,
+                        duration: data.duration,
+                        createdAt: data.createdAt.toDate()
+                    });
                 } else {
                     setError('スケジュールが見つかりませんでした');
                 }
@@ -134,7 +153,7 @@ export default function SchedulePage() {
     };
 
     // マウス移動時の処理（セル上）
-    const handleCellMouseEnter = (dateIndex: number, timeIndex: number, e: React.MouseEvent) => {
+    const handleCellMouseEnter = (dateIndex: number, timeIndex: number, _: React.MouseEvent) => {
         if (!isSelecting) return;
 
         // ドラッグ開始フラグを立てる
@@ -145,7 +164,7 @@ export default function SchedulePage() {
     };
 
     // グローバルなマウス移動の検知（セル外でのドラッグにも対応）
-    const handleGlobalMouseMove = (e: MouseEvent) => {
+    const handleGlobalMouseMove = (_: MouseEvent) => {
         if (!isSelecting) return;
 
         // マウスが移動したらドラッグ開始とみなす
@@ -367,7 +386,7 @@ export default function SchedulePage() {
                                         {time}
                                     </div>
                                     {dates.map((_, dateIndex) => {
-                                        const { isSelected, isInActiveSelection, availability, availabilityRatio } = getCellStatus(dateIndex, timeIndex);
+                                        const { isSelected, isInActiveSelection, availability } = getCellStatus(dateIndex, timeIndex);
 
                                         const cellClassName = `
                                             time-slot 
@@ -616,7 +635,7 @@ function getDatesInRange(startDate: string, endDate: string): Date[] {
     const end = new Date(endDate);
     const dates: Date[] = [];
 
-    let current = start;
+    const current = start;
     while (current <= end) {
         dates.push(new Date(current));
         current.setDate(current.getDate() + 1);

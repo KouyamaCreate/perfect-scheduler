@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { useSearchParams } from 'next/navigation';
@@ -85,7 +85,7 @@ export default function ScheduleDemo() {
     };
 
     // マウス移動時の処理（セル上）
-    const handleCellMouseEnter = (dateIndex: number, timeIndex: number, e: React.MouseEvent) => {
+    const handleCellMouseEnter = (dateIndex: number, timeIndex: number, _: React.MouseEvent) => {
         if (!isSelecting) return;
 
         // ドラッグ開始フラグを立てる
@@ -96,7 +96,7 @@ export default function ScheduleDemo() {
     };
 
     // グローバルなマウス移動の検知（セル外でのドラッグにも対応）
-    const handleGlobalMouseMove = (e: MouseEvent) => {
+    const handleGlobalMouseMove = (_: MouseEvent) => {
         if (!isSelecting) return;
 
         // マウスが移動したらドラッグ開始とみなす
@@ -297,7 +297,7 @@ export default function ScheduleDemo() {
                                         {time}
                                     </div>
                                     {dates.map((_, dateIndex) => {
-                                        const { isSelected, isInActiveSelection, availability, availabilityRatio } = getCellStatus(dateIndex, timeIndex);
+                                        const { isSelected, isInActiveSelection, availability } = getCellStatus(dateIndex, timeIndex);
 
                                         const cellClassName = `
                                             time-slot 
@@ -546,7 +546,7 @@ function getDatesInRange(startDate: string, endDate: string): Date[] {
     const end = new Date(endDate);
     const dates: Date[] = [];
 
-    let current = start;
+    const current = start;
     while (current <= end) {
         dates.push(new Date(current));
         current.setDate(current.getDate() + 1);

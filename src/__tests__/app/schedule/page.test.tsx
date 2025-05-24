@@ -1,7 +1,7 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import SchedulePage from '@/app/schedule/[id]/page';
-import { doc, getDoc, collection, addDoc, onSnapshot, query, orderBy } from 'firebase/firestore';
+import { getDoc, addDoc, onSnapshot } from 'firebase/firestore';
 import { useParams } from 'next/navigation';
 
 // next/navigationのモック
@@ -101,7 +101,7 @@ describe('SchedulePage', () => {
 
         // 選択済み時間枠があるとして、addDocが呼ばれることをテスト
         // これは実際のDOMイベントをシミュレートできないため、内部実装をテスト
-        const handleAddParticipant = jest.spyOn(React, 'useState').mockImplementationOnce(() => ['テスト参加者3', jest.fn()]);
+        jest.spyOn(React, 'useState').mockImplementationOnce(() => ['テスト参加者3', jest.fn()]);
         jest.spyOn(React, 'useState').mockImplementationOnce(() => [['0-0'], jest.fn()]);
 
         // 参加情報を登録

@@ -4,6 +4,9 @@ import React, { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
+import { v4 as uuidv4 } from 'uuid';
+import { doc, setDoc } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
 
 export default function CreateSchedule() {
     const router = useRouter();
@@ -15,22 +18,31 @@ export default function CreateSchedule() {
     const [endTime, setEndTime] = useState('17:00');
     const [timeSlotDuration, setTimeSlotDuration] = useState('30');
 
-    const handleSubmit = (e: React.FormEvent) => {
+    const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
 
-        // 実際のアプリケーションでは、ここでデータをバックエンドに送信する
-        // 今回はデモ用に、クエリパラメータとして情報を渡すだけ
-        const params = new URLSearchParams();
-        params.append('name', eventName);
-        params.append('description', description);
-        params.append('startDate', startDate);
-        params.append('endDate', endDate);
-        params.append('startTime', startTime);
-        params.append('endTime', endTime);
-        params.append('duration', timeSlotDuration);
+        try {
+            // ユニークIDを生成
+            const scheduleId = uuidv4();
 
-        // スケジュールページに移動（実際のアプリでは、作成されたスケジュールのIDで移動）
-        router.push(`/schedule/demo?${params.toString()}`);
+            // Firestoreにデータを保存
+            await setDoc(doc(db, 'schedules', scheduleId), {
+                name: eventName,
+                description,
+                startDate,
+                endDate,
+                startTime,
+                endTime,
+                duration: parseInt(timeSlotDuration),
+                createdAt: new Date()
+            });
+
+            // スケジュールページに移動
+            router.push(`/schedule/${scheduleId}`);
+        } catch (error) {
+            console.error('Error creating schedule:', error);
+            alert('スケジュールの作成中にエラーが発生しました。もう一度お試しください。');
+        }
     };
 
     return (

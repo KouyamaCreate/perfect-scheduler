@@ -44,6 +44,14 @@ export default function SchedulePage() {
     const [isAdding, setIsAdding] = useState(true);
     const [dragStarted, setDragStarted] = useState(false);
 
+    // ホバーされたセルの情報
+    interface HoveredCellInfo {
+      dateIndex: number;
+      timeIndex: number;
+      participantNames: string[];
+    }
+    const [hoveredCellInfo, setHoveredCellInfo] = useState<HoveredCellInfo | null>(null);
+
     // スケジュールデータの取得
     useEffect(() => {
         const fetchScheduleData = async () => {
@@ -152,8 +160,8 @@ export default function SchedulePage() {
         window.addEventListener('mousemove', handleGlobalMouseMove);
     };
 
-    // マウス移動時の処理（セル上）
-    const handleCellMouseEnter = (dateIndex: number, timeIndex: number) => {
+    // マウス移動時の処理（セル上） - 選択操作用
+    const handleCellMouseEnterForSelection = (dateIndex: number, timeIndex: number) => {
         if (!isSelecting) return;
 
         // ドラッグ開始フラグを立てる
@@ -161,6 +169,18 @@ export default function SchedulePage() {
 
         // 現在位置を更新
         setSelectionCurrentPoint({ dateIndex, timeIndex });
+    };
+
+    // マウスエンター時の処理 - ツールチップ用
+    const handleCellMouseEnter = (dateIndex: number, timeIndex: number) => {
+        const slotId = `${dateIndex}-${timeIndex}`;
+        const participantNames = getAvailability(participants, slotId);
+        setHoveredCellInfo({ dateIndex, timeIndex, participantNames });
+    };
+
+    // マウスリーブ時の処理 - ツールチップ用
+    const handleCellMouseLeave = () => {
+        setHoveredCellInfo(null);
     };
 
     // グローバルなマウス移動の検知（セル外でのドラッグにも対応）
@@ -210,7 +230,8 @@ export default function SchedulePage() {
     // 選択状態に基づいて表示を更新（選択中の範囲を含む）
     const getCellStatus = (dateIndex: number, timeIndex: number) => {
         const slotId = `${dateIndex}-${timeIndex}`;
-        const availability = getAvailability(participants, slotId);
+        const availableParticipants = getAvailability(participants, slotId);
+        const availability = availableParticipants.length;
         const availabilityRatio = participants.length > 0 ? availability / participants.length : 0;
 
         // 通常の選択状態
@@ -365,8 +386,26 @@ export default function SchedulePage() {
                             </div>
                         </div>
 
+                        {/* Tooltip */}
+                        {hoveredCellInfo && hoveredCellInfo.participantNames.length > 0 && (
+                            <div
+                                className="schedule-tooltip absolute pointer-events-none"
+                                style={{
+                                    left: `${(hoveredCellInfo.dateIndex + 1) * 60 + 30}px`, // Approximate positioning
+                                    top: `${hoveredCellInfo.timeIndex * 40 + 20}px`,      // Approximate positioning
+                                }}
+                            >
+                                <p className="font-semibold mb-1">Available:</p>
+                                <ul className="list-disc list-inside">
+                                    {hoveredCellInfo.participantNames.map(name => (
+                                        <li key={name}>{name}</li>
+                                    ))}
+                                </ul>
+                            </div>
+                        )}
+
                         <div
-                            className="calendar-grid mb-4"
+                            className="calendar-grid mb-4 relative" // Added relative positioning
                             style={{
                                 gridTemplateColumns: `auto ${dates.map(() => '1fr').join(' ')}`
                             }}
@@ -435,7 +474,11 @@ export default function SchedulePage() {
                                                 key={dateIndex}
                                                 className={cellClassName}
                                                 onMouseDown={(e) => handleCellMouseDown(dateIndex, timeIndex, e)}
-                                                onMouseEnter={() => handleCellMouseEnter(dateIndex, timeIndex)}
+                                                onMouseEnter={() => {
+                                                    handleCellMouseEnterForSelection(dateIndex, timeIndex);
+                                                    handleCellMouseEnter(dateIndex, timeIndex);
+                                                }}
+                                                onMouseLeave={handleCellMouseLeave}
                                                 data-date-index={dateIndex}
                                                 data-time-index={timeIndex}
                                                 style={{
@@ -624,6 +667,25 @@ export default function SchedulePage() {
                 .time-slot.selected:hover {
                     opacity: 0.9;
                 }
+                .schedule-tooltip {
+                    background-color: var(--secondary, #333); /* Fallback to dark gray */
+                    color: var(--foreground, #fff); /* Fallback to white */
+                    padding: 8px;
+                    border-radius: 4px;
+                    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+                    z-index: 20; /* Ensure it's above cells */
+                    /* pointer-events: none; moved to className */
+                }
+                .schedule-tooltip p {
+                    margin-bottom: 4px; /* Add some space below the title */
+                }
+                .schedule-tooltip ul {
+                    list-style: none; /* Remove default list styling */
+                    padding-left: 0; /* Remove default padding */
+                }
+                .schedule-tooltip li {
+                    font-size: 0.875rem; /* Smaller font for list items */
+                }
             `}</style>
         </div>
     );
@@ -670,8 +732,8 @@ function formatDate(date: Date): string {
     return `${month}/${day} (${weekday})`;
 }
 
-function getAvailability(participants: { name: string, slots: string[] }[], slotId: string): number {
-    return participants.filter(p => p.slots.includes(slotId)).length;
+function getAvailability(participants: { name: string, slots: string[] }[], slotId: string): string[] {
+    return participants.filter(p => p.slots.includes(slotId)).map(p => p.name);
 }
 
 // HEX色コードをRGB値に変換する関数

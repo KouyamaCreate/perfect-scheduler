@@ -401,8 +401,8 @@ export default function SchedulePage() {
                                 className="schedule-tooltip pointer-events-none" // Removed 'absolute' as style now sets position: fixed
                                 style={{
                                     position: 'fixed', // Use fixed positioning with pageX/pageY
-                                    left: `${hoveredCellInfo.mouseX + 10}px`,
-                                    top: `${hoveredCellInfo.mouseY + 10}px`,
+                                    left: `${hoveredCellInfo.mouseX}px`,
+                                    top: `${hoveredCellInfo.mouseY}px`,
                                 }}
                             >
                                 <p className="font-semibold mb-1">Available:</p>

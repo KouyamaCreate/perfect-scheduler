@@ -18,6 +18,28 @@ export default function CreateSchedule() {
     const [endTime, setEndTime] = useState('17:00');
     const [timeSlotDuration, setTimeSlotDuration] = useState('30');
 
+    // State for date order validation
+    const [isDateOrderValid, setIsDateOrderValid] = useState(true);
+    const [dateOrderWarning, setDateOrderWarning] = useState("");
+
+    React.useEffect(() => {
+        if (startDate && endDate) {
+            const d1 = new Date(startDate);
+            const d2 = new Date(endDate);
+            if (d2 < d1) {
+                setIsDateOrderValid(false);
+                setDateOrderWarning("終了日は開始日より後の日付を選択してください。");
+            } else {
+                setIsDateOrderValid(true);
+                setDateOrderWarning("");
+            }
+        } else {
+            // If one or both dates are empty, clear previous warning and consider valid for now
+            setIsDateOrderValid(true);
+            setDateOrderWarning("");
+        }
+    }, [startDate, endDate]);
+
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
 
@@ -133,6 +155,7 @@ export default function CreateSchedule() {
                                 />
                             </div>
                         </div>
+                        {dateOrderWarning && <p className="text-red-500 text-sm mt-1 mb-4">{dateOrderWarning}</p>}
 
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                             <div>
@@ -186,7 +209,7 @@ export default function CreateSchedule() {
                         <Link href="/" className="btn btn-secondary">
                             キャンセル
                         </Link>
-                        <button type="submit" className="btn btn-primary">
+                        <button type="submit" className="btn btn-primary" disabled={!isDateOrderValid}>
                             スケジュールを作成
                         </button>
                     </div>

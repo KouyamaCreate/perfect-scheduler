@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { useParams } from 'next/navigation';
@@ -51,6 +51,11 @@ export default function SchedulePage() {
       mouseY: number;
     }
     const [hoveredCellInfo, setHoveredCellInfo] = useState<HoveredCellInfo | null>(null);
+
+    // Ref for scrollable container
+    const scrollContainerRef = useRef<HTMLDivElement>(null);
+    // State for raw mouse coordinates
+    const [rawMousePosition, setRawMousePosition] = useState<{ x: number, y: number } | null>(null);
 
     // スケジュールデータの取得
     useEffect(() => {
@@ -192,11 +197,12 @@ export default function SchedulePage() {
     };
 
     // グローバルなマウス移動の検知（セル外でのドラッグにも対応）
-    const handleGlobalMouseMove = () => {
+    const handleGlobalMouseMove = (event: MouseEvent) => {
         if (!isSelecting) return;
 
         // マウスが移動したらドラッグ開始とみなす
         setDragStarted(true);
+        setRawMousePosition({ x: event.clientX, y: event.clientY });
     };
 
     // マウスを離した時の処理
@@ -216,11 +222,47 @@ export default function SchedulePage() {
         setIsSelecting(false);
         setSelectionStartPoint(null);
         setSelectionCurrentPoint(null);
+        setRawMousePosition(null); // Reset mouse position
 
         // イベントリスナーを削除
         window.removeEventListener('mouseup', handleMouseUp);
         window.removeEventListener('mousemove', handleGlobalMouseMove);
     };
+
+    // Auto-scroll effect
+    useEffect(() => {
+        if (!isSelecting || !scrollContainerRef.current || !rawMousePosition) {
+            return;
+        }
+
+        const scrollAmount = 15; // Pixels to scroll by
+        const scrollThreshold = 50; // Distance from edge to trigger scroll (px)
+        const container = scrollContainerRef.current;
+        const rect = container.getBoundingClientRect();
+        const { x: mouseX, y: mouseY } = rawMousePosition;
+
+        // Horizontal scroll
+        if (mouseX > rect.right - scrollThreshold && mouseX < rect.right + scrollThreshold) {
+            if (container.scrollLeft + rect.width < container.scrollWidth) {
+                container.scrollLeft += scrollAmount;
+            }
+        } else if (mouseX < rect.left + scrollThreshold && mouseX > rect.left - scrollThreshold) {
+            if (container.scrollLeft > 0) {
+                container.scrollLeft -= scrollAmount;
+            }
+        }
+
+        // Vertical scroll
+        if (mouseY > rect.bottom - scrollThreshold && mouseY < rect.bottom + scrollThreshold) {
+            if (container.scrollTop + rect.height < container.scrollHeight) {
+                container.scrollTop += scrollAmount;
+            }
+        } else if (mouseY < rect.top + scrollThreshold && mouseY > rect.top - scrollThreshold) {
+            if (container.scrollTop > 0) {
+                container.scrollTop -= scrollAmount;
+            }
+        }
+    }, [rawMousePosition, isSelecting]);
 
     // セルの選択状態をトグルする
     const toggleCellSelection = (dateIndex: number, timeIndex: number) => {
@@ -361,7 +403,7 @@ export default function SchedulePage() {
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
                     {/* スケジュール表示部分 */}
-                    <div className="md:col-span-2 overflow-x-auto">
+                    <div ref={scrollContainerRef} className="md:col-span-2 overflow-x-auto overflow-y-auto">
                         <div className="flex justify-between items-center mb-4">
                             <h2 className="text-xl font-semibold">スケジュールを選択</h2>
 
@@ -417,7 +459,7 @@ export default function SchedulePage() {
                         <div
                             className="calendar-grid mb-4 relative" // Added relative positioning
                             style={{
-                                gridTemplateColumns: `auto ${dates.map(() => '1fr').join(' ')}`
+                                gridTemplateColumns: `auto ${dates.map(() => 'minmax(80px, 1fr)').join(' ')}`
                             }}
                         >
                             {/* 日付ヘッダー */}

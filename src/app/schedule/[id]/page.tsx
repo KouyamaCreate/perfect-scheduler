@@ -46,9 +46,9 @@ export default function SchedulePage() {
 
     // ホバーされたセルの情報
     interface HoveredCellInfo {
-      dateIndex: number;
-      timeIndex: number;
       participantNames: string[];
+      mouseX: number;
+      mouseY: number;
     }
     const [hoveredCellInfo, setHoveredCellInfo] = useState<HoveredCellInfo | null>(null);
 
@@ -172,10 +172,18 @@ export default function SchedulePage() {
     };
 
     // マウスエンター時の処理 - ツールチップ用
-    const handleCellMouseEnter = (dateIndex: number, timeIndex: number) => {
+    const handleCellMouseEnter = (
+        dateIndex: number,
+        timeIndex: number,
+        event: React.MouseEvent<HTMLDivElement>
+    ) => {
         const slotId = `${dateIndex}-${timeIndex}`;
         const participantNames = getAvailability(participants, slotId);
-        setHoveredCellInfo({ dateIndex, timeIndex, participantNames });
+        setHoveredCellInfo({
+            participantNames,
+            mouseX: event.pageX,
+            mouseY: event.pageY
+        });
     };
 
     // マウスリーブ時の処理 - ツールチップ用
@@ -387,12 +395,14 @@ export default function SchedulePage() {
                         </div>
 
                         {/* Tooltip */}
+                        {/* Tooltip */}
                         {hoveredCellInfo && hoveredCellInfo.participantNames.length > 0 && (
                             <div
-                                className="schedule-tooltip absolute pointer-events-none"
+                                className="schedule-tooltip pointer-events-none" // Removed 'absolute' as style now sets position: fixed
                                 style={{
-                                    left: `${(hoveredCellInfo.dateIndex + 1) * 60 + 30}px`, // Approximate positioning
-                                    top: `${hoveredCellInfo.timeIndex * 40 + 20}px`,      // Approximate positioning
+                                    position: 'fixed', // Use fixed positioning with pageX/pageY
+                                    left: `${hoveredCellInfo.mouseX + 10}px`,
+                                    top: `${hoveredCellInfo.mouseY + 10}px`,
                                 }}
                             >
                                 <p className="font-semibold mb-1">Available:</p>
@@ -474,9 +484,9 @@ export default function SchedulePage() {
                                                 key={dateIndex}
                                                 className={cellClassName}
                                                 onMouseDown={(e) => handleCellMouseDown(dateIndex, timeIndex, e)}
-                                                onMouseEnter={() => {
-                                                    handleCellMouseEnterForSelection(dateIndex, timeIndex);
-                                                    handleCellMouseEnter(dateIndex, timeIndex);
+                                                onMouseEnter={(event) => { // Pass event to handlers
+                                                    handleCellMouseEnterForSelection(dateIndex, timeIndex); // This one doesn't need event yet
+                                                    handleCellMouseEnter(dateIndex, timeIndex, event);
                                                 }}
                                                 onMouseLeave={handleCellMouseLeave}
                                                 data-date-index={dateIndex}
@@ -673,8 +683,9 @@ export default function SchedulePage() {
                     padding: 8px;
                     border-radius: 4px;
                     box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
-                    z-index: 20; /* Ensure it's above cells */
-                    /* pointer-events: none; moved to className */
+                    z-index: 1000; /* Ensure it's above most other content when fixed */
+                    /* pointer-events: none; already in className */
+                    /* position: fixed; will be set by inline style if using mouseX/mouseY */
                 }
                 .schedule-tooltip p {
                     margin-bottom: 4px; /* Add some space below the title */

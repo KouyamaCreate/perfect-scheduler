@@ -181,8 +181,8 @@ export default function SchedulePage() {
         const participantNames = getAvailability(participants, slotId);
         setHoveredCellInfo({
             participantNames,
-            mouseX: event.pageX,
-            mouseY: event.pageY
+            mouseX: event.clientX,
+            mouseY: event.clientY
         });
     };
 

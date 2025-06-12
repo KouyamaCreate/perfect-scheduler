@@ -187,7 +187,7 @@ export default function SchedulePage() {
     };
 
     // タッチ移動時
-    const handleCellTouchMove = (dateIndex: number, timeIndex: number, e: React.TouchEvent) => {
+    const handleCellTouchMove = (dateIndex: number, timeIndex: number, _: React.TouchEvent) => {
         if (!isSelecting) return;
         setDragStarted(true);
         setSelectionCurrentPoint({ dateIndex, timeIndex });
@@ -195,7 +195,7 @@ export default function SchedulePage() {
     };
 
     // タッチ終了時
-    const handleCellTouchEnd = (dateIndex: number, timeIndex: number, e: React.TouchEvent) => {
+    const handleCellTouchEnd = (dateIndex: number, timeIndex: number, _: React.TouchEvent) => {
         setIsSelecting(false);
         setTouchActiveCell(null);
     };

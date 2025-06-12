@@ -168,6 +168,9 @@ export default function SchedulePage() {
 
     // タッチ開始時
     const handleCellTouchStart = (dateIndex: number, timeIndex: number, e: React.TouchEvent) => {
+        // スクロールを妨げないように、シングルタッチのみ処理
+        if (e.touches.length !== 1) return;
+        
         e.preventDefault();
 
         const slotId = `${dateIndex}-${timeIndex}`;
@@ -188,8 +191,12 @@ export default function SchedulePage() {
 
     // タッチ移動時
     const handleCellTouchMove = (e: React.TouchEvent) => {
-        if (!isSelecting) return;
-        e.preventDefault();
+        if (!isSelecting || e.touches.length !== 1) return;
+        
+        // スクロールを妨げる可能性があるので、選択中のみプリベント
+        if (dragStarted) {
+            e.preventDefault();
+        }
         
         const touch = e.touches[0];
         if (!touch) return;
@@ -398,7 +405,7 @@ export default function SchedulePage() {
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
                     {/* スケジュール表示部分 */}
-                    <div className="md:col-span-2 overflow-x-auto">
+                    <div className="md:col-span-2">
                         <div className="flex justify-between items-center mb-4">
                             <h2 className="text-xl font-semibold">スケジュールを選択</h2>
 
@@ -431,12 +438,13 @@ export default function SchedulePage() {
                             </div>
                         </div>
 
-                        <div
-                            className="calendar-grid mb-4"
-                            style={{
-                                gridTemplateColumns: `auto ${dates.map(() => '1fr').join(' ')}`
-                            }}
-                        >
+                        <div className="calendar-container mb-4">
+                            <div
+                                className="calendar-grid"
+                                style={{
+                                    gridTemplateColumns: `auto ${dates.map(() => '1fr').join(' ')}`
+                                }}
+                            >
                             {/* 日付ヘッダー */}
                             <div className="p-2 font-bold border-b border-r border-[var(--border)]"></div>
                             {dates.map((date, index) => (
@@ -514,7 +522,7 @@ export default function SchedulePage() {
                                                 data-time-index={timeIndex}
                                                 style={{
                                                     userSelect: 'none',
-                                                    touchAction: 'none',
+                                                    touchAction: 'manipulation',
                                                     WebkitTouchCallout: 'none',
                                                     WebkitUserSelect: 'none',
                                                     // 選択中のエレメントが必ず上に表示されるようにz-indexを設定
@@ -533,6 +541,7 @@ export default function SchedulePage() {
                                     })}
                                 </React.Fragment>
                             ))}
+                            </div>
                         </div>
 
                         <div className="flex flex-wrap items-center gap-4 mb-8">
@@ -670,35 +679,90 @@ export default function SchedulePage() {
             </footer>
 
             <style jsx>{`
+                .calendar-container {
+                    overflow: auto;
+                    max-height: 70vh;
+                    max-width: 100%;
+                    border: 1px solid var(--border);
+                    border-radius: 8px;
+                    position: relative;
+                }
+                
+                /* スクロールバーのスタイル調整 */
+                .calendar-container::-webkit-scrollbar {
+                    width: 8px;
+                    height: 8px;
+                }
+                
+                .calendar-container::-webkit-scrollbar-track {
+                    background: var(--secondary);
+                    border-radius: 4px;
+                }
+                
+                .calendar-container::-webkit-scrollbar-thumb {
+                    background: var(--border);
+                    border-radius: 4px;
+                }
+                
+                .calendar-container::-webkit-scrollbar-thumb:hover {
+                    background: var(--primary);
+                }
+                
+                /* Firefox用スクロールバー */
+                .calendar-container {
+                    scrollbar-width: thin;
+                    scrollbar-color: var(--border) var(--secondary);
+                }
+                
                 .calendar-grid {
                     display: grid;
+                    min-width: max-content;
                 }
+                
                 .time-slot {
                     min-height: 2.5rem;
+                    min-width: 80px;
                     cursor: pointer;
                     transition: background-color 0.1s;
                     position: relative;
                 }
+                
                 .time-slot.selected {
                     background-color: var(--primary) !important;
                     z-index: 5;
                 }
+                
                 .time-slot.active-selecting {
                     background-color: var(--primary) !important;
                     opacity: 0.7;
                     z-index: 10;
                 }
+                
                 .time-slot.active-deselecting {
                     background-color: transparent !important;
                     opacity: 0.5;
                     z-index: 10;
                 }
+                
                 .time-slot:hover {
                     background-color: var(--secondary);
                     z-index: 3;
                 }
+                
                 .time-slot.selected:hover {
                     opacity: 0.9;
+                }
+                
+                /* モバイルデバイス用の調整 */
+                @media (max-width: 768px) {
+                    .calendar-container {
+                        max-height: 60vh;
+                    }
+                    
+                    .time-slot {
+                        min-width: 60px;
+                        min-height: 3rem;
+                    }
                 }
             `}</style>
         </div>

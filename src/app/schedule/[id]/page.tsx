@@ -187,16 +187,45 @@ export default function SchedulePage() {
     };
 
     // タッチ移動時
-    const handleCellTouchMove = (dateIndex: number, timeIndex: number, _: React.TouchEvent) => {
+    const handleCellTouchMove = (e: React.TouchEvent) => {
         if (!isSelecting) return;
-        setDragStarted(true);
-        setSelectionCurrentPoint({ dateIndex, timeIndex });
-        setTouchActiveCell({ dateIndex, timeIndex });
+        e.preventDefault();
+        
+        const touch = e.touches[0];
+        if (!touch) return;
+        
+        // タッチ座標から該当するセルを特定
+        const element = document.elementFromPoint(touch.clientX, touch.clientY);
+        if (!element) return;
+        
+        const dateIndex = element.getAttribute('data-date-index');
+        const timeIndex = element.getAttribute('data-time-index');
+        
+        if (dateIndex !== null && timeIndex !== null) {
+            const parsedDateIndex = parseInt(dateIndex);
+            const parsedTimeIndex = parseInt(timeIndex);
+            
+            setDragStarted(true);
+            setSelectionCurrentPoint({ dateIndex: parsedDateIndex, timeIndex: parsedTimeIndex });
+            setTouchActiveCell({ dateIndex: parsedDateIndex, timeIndex: parsedTimeIndex });
+        }
     };
 
     // タッチ終了時
-    const handleCellTouchEnd = (dateIndex: number, timeIndex: number, _: React.TouchEvent) => {
+    const handleCellTouchEnd = (e: React.TouchEvent) => {
+        e.preventDefault();
+        
+        if (isSelecting) {
+            // ドラッグしていなかった場合は1マスだけの選択/解除
+            if (!dragStarted && selectionStartPoint) {
+                const { dateIndex, timeIndex } = selectionStartPoint;
+                toggleCellSelection(dateIndex, timeIndex);
+            }
+        }
+        
         setIsSelecting(false);
+        setSelectionStartPoint(null);
+        setSelectionCurrentPoint(null);
         setTouchActiveCell(null);
     };
 
@@ -479,13 +508,15 @@ export default function SchedulePage() {
                                                 onMouseDown={(e) => handleCellMouseDown(dateIndex, timeIndex, e)}
                                                 onMouseEnter={() => handleCellMouseEnter(dateIndex, timeIndex)}
                                                 onTouchStart={(e) => handleCellTouchStart(dateIndex, timeIndex, e)}
-                                                onTouchMove={(e) => handleCellTouchMove(dateIndex, timeIndex, e)}
-                                                onTouchEnd={(e) => handleCellTouchEnd(dateIndex, timeIndex, e)}
+                                                onTouchMove={handleCellTouchMove}
+                                                onTouchEnd={handleCellTouchEnd}
                                                 data-date-index={dateIndex}
                                                 data-time-index={timeIndex}
                                                 style={{
                                                     userSelect: 'none',
-                                                    touchAction: 'manipulation',
+                                                    touchAction: 'none',
+                                                    WebkitTouchCallout: 'none',
+                                                    WebkitUserSelect: 'none',
                                                     // 選択中のエレメントが必ず上に表示されるようにz-indexを設定
                                                     zIndex: isSelecting && (isInActiveSelection || isSelected) ? 10 : 1,
                                                     // 参加者の割合に応じた背景色を設定

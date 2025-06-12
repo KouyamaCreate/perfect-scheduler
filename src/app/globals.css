@@ -137,10 +137,23 @@ body {
   border: 1px solid var(--border);
   transition: all 0.15s ease;
   aspect-ratio: 1 / 1;
+  min-width: 44px;
+  min-height: 44px;
+  touch-action: manipulation;
+  /* タッチ端末での意図しない挙動防止 */
 }
 
-.time-slot:hover {
-  background-color: rgba(99, 102, 241, 0.1);
+@media (hover: hover) {
+  .time-slot:hover {
+    background-color: rgba(99, 102, 241, 0.1);
+  }
+}
+
+/* タッチデバイス専用アクティブ風スタイル例 */
+@media (hover: none) and (pointer: coarse) {
+  .time-slot.touch-active {
+    background-color: rgba(99, 102, 241, 0.15);
+  }
 }
 
 .time-slot.selected {

@@ -163,6 +163,43 @@ export default function SchedulePage() {
         setSelectionCurrentPoint({ dateIndex, timeIndex });
     };
 
+    // タッチイベント用state
+    const [touchActiveCell, setTouchActiveCell] = useState<{ dateIndex: number, timeIndex: number } | null>(null);
+
+    // タッチ開始時
+    const handleCellTouchStart = (dateIndex: number, timeIndex: number, e: React.TouchEvent) => {
+        e.preventDefault();
+
+        const slotId = `${dateIndex}-${timeIndex}`;
+        const isSelected = selectedSlots.includes(slotId);
+
+        setIsAdding(!isSelected);
+        setSelectionStartPoint({ dateIndex, timeIndex });
+        setSelectionCurrentPoint({ dateIndex, timeIndex });
+        setIsSelecting(true);
+        setDragStarted(false);
+
+        if (selectionType === 'path') {
+            toggleCellSelection(dateIndex, timeIndex);
+        }
+
+        setTouchActiveCell({ dateIndex, timeIndex });
+    };
+
+    // タッチ移動時
+    const handleCellTouchMove = (dateIndex: number, timeIndex: number, e: React.TouchEvent) => {
+        if (!isSelecting) return;
+        setDragStarted(true);
+        setSelectionCurrentPoint({ dateIndex, timeIndex });
+        setTouchActiveCell({ dateIndex, timeIndex });
+    };
+
+    // タッチ終了時
+    const handleCellTouchEnd = (dateIndex: number, timeIndex: number, e: React.TouchEvent) => {
+        setIsSelecting(false);
+        setTouchActiveCell(null);
+    };
+
     // グローバルなマウス移動の検知（セル外でのドラッグにも対応）
     const handleGlobalMouseMove = () => {
         if (!isSelecting) return;
@@ -433,14 +470,22 @@ export default function SchedulePage() {
                                         return (
                                             <div
                                                 key={dateIndex}
-                                                className={cellClassName}
+                                                className={
+                                                    cellClassName +
+                                                    ((touchActiveCell && touchActiveCell.dateIndex === dateIndex && touchActiveCell.timeIndex === timeIndex)
+                                                        ? ' touch-active'
+                                                        : '')
+                                                }
                                                 onMouseDown={(e) => handleCellMouseDown(dateIndex, timeIndex, e)}
                                                 onMouseEnter={() => handleCellMouseEnter(dateIndex, timeIndex)}
+                                                onTouchStart={(e) => handleCellTouchStart(dateIndex, timeIndex, e)}
+                                                onTouchMove={(e) => handleCellTouchMove(dateIndex, timeIndex, e)}
+                                                onTouchEnd={(e) => handleCellTouchEnd(dateIndex, timeIndex, e)}
                                                 data-date-index={dateIndex}
                                                 data-time-index={timeIndex}
                                                 style={{
                                                     userSelect: 'none',
-                                                    touchAction: 'none',
+                                                    touchAction: 'manipulation',
                                                     // 選択中のエレメントが必ず上に表示されるようにz-indexを設定
                                                     zIndex: isSelecting && (isInActiveSelection || isSelected) ? 10 : 1,
                                                     // 参加者の割合に応じた背景色を設定

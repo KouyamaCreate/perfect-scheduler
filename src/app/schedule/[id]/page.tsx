@@ -36,6 +36,9 @@ export default function SchedulePage() {
 
     // 選択モード（デフォルトはWhen2Meetと同じく範囲選択）
     const [selectionType, setSelectionType] = useState<'path' | 'area'>('area');
+    
+    // スマホ用選択モード切り替え
+    const [isMobileSelectionMode, setIsMobileSelectionMode] = useState(false);
 
     // 選択操作のための状態変数
     const [isSelecting, setIsSelecting] = useState(false);
@@ -168,7 +171,12 @@ export default function SchedulePage() {
 
     // タッチ開始時
     const handleCellTouchStart = (dateIndex: number, timeIndex: number, e: React.TouchEvent) => {
-        // スクロールを妨げないように、シングルタッチのみ処理
+        // スマホで選択モードがOFFの場合はスクロールを優先
+        if (window.innerWidth <= 768 && !isMobileSelectionMode) {
+            return;
+        }
+        
+        // シングルタッチのみ処理
         if (e.touches.length !== 1) return;
         
         e.preventDefault();
@@ -191,9 +199,14 @@ export default function SchedulePage() {
 
     // タッチ移動時
     const handleCellTouchMove = (e: React.TouchEvent) => {
+        // スマホで選択モードがOFFの場合はスクロールを優先
+        if (window.innerWidth <= 768 && !isMobileSelectionMode) {
+            return;
+        }
+        
         if (!isSelecting || e.touches.length !== 1) return;
         
-        // スクロールを妨げる可能性があるので、選択中のみプリベント
+        // 選択中のみプリベント
         if (dragStarted) {
             e.preventDefault();
         }
@@ -220,6 +233,11 @@ export default function SchedulePage() {
 
     // タッチ終了時
     const handleCellTouchEnd = (e: React.TouchEvent) => {
+        // スマホで選択モードがOFFの場合はスクロールを優先
+        if (window.innerWidth <= 768 && !isMobileSelectionMode) {
+            return;
+        }
+        
         e.preventDefault();
         
         if (isSelecting) {
@@ -406,11 +424,28 @@ export default function SchedulePage() {
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
                     {/* スケジュール表示部分 */}
                     <div className="md:col-span-2">
-                        <div className="flex justify-between items-center mb-4">
-                            <h2 className="text-xl font-semibold">スケジュールを選択</h2>
-
-                            {/* 選択モード切り替え */}
-                            <div className="flex items-center gap-4">
+                        <div className="flex flex-col gap-4 mb-4">
+                            <div className="flex justify-between items-center">
+                                <h2 className="text-xl font-semibold">スケジュールを選択</h2>
+                                
+                                {/* スマホ用選択モード切り替え */}
+                                <div className="md:hidden flex items-center gap-2">
+                                    <span className="text-sm">選択モード:</span>
+                                    <button
+                                        onClick={() => setIsMobileSelectionMode(!isMobileSelectionMode)}
+                                        className={`px-3 py-1 rounded text-sm font-medium transition-colors ${
+                                            isMobileSelectionMode 
+                                                ? 'bg-[var(--primary)] text-white' 
+                                                : 'bg-[var(--secondary)] text-[var(--foreground)]'
+                                        }`}
+                                    >
+                                        {isMobileSelectionMode ? '選択中' : 'スクロール'}
+                                    </button>
+                                </div>
+                            </div>
+                            
+                            {/* PC用選択モード切り替え */}
+                            <div className="hidden md:flex items-center gap-4">
                                 <div className="flex items-center gap-1">
                                     <input
                                         type="radio"
@@ -436,6 +471,14 @@ export default function SchedulePage() {
                                     <label htmlFor="pathMode" className="text-sm">なぞり選択</label>
                                 </div>
                             </div>
+                            
+                            {/* スマホ用アドバイス */}
+                            <div className="md:hidden text-sm opacity-80">
+                                {isMobileSelectionMode 
+                                    ? '⚡ 予定選択モード: タップ・ドラッグで選択できます'
+                                    : '📱 スクロールモード: 上のボタンで選択モードに切り替えできます'
+                                }
+                            </div>
                         </div>
 
                         <div className="calendar-container mb-4">
@@ -446,18 +489,18 @@ export default function SchedulePage() {
                                 }}
                             >
                             {/* 日付ヘッダー */}
-                            <div className="p-2 font-bold border-b border-r border-[var(--border)]"></div>
+                            <div className="time-header sticky top-0 left-0 z-20 bg-[var(--background)] border-b border-r border-[var(--border)]"></div>
                             {dates.map((date, index) => (
-                                <div key={index} className="p-2 text-center font-bold border-b border-r border-[var(--border)]">
-                                    {formatDate(date)}
+                                <div key={index} className="date-header sticky top-0 z-10 bg-[var(--background)] text-center font-bold border-b border-r border-[var(--border)]">
+                                    <div className="text-xs">{formatDate(date)}</div>
                                 </div>
                             ))}
 
                             {/* 時間スロット */}
                             {timeSlots.map((time, timeIndex) => (
                                 <React.Fragment key={timeIndex}>
-                                    <div className="p-2 border-b border-r border-[var(--border)] whitespace-nowrap">
-                                        {time}
+                                    <div className="time-label sticky left-0 z-10 bg-[var(--background)] border-b border-r border-[var(--border)] whitespace-nowrap">
+                                        <div className="text-xs font-medium">{time}</div>
                                     </div>
                                     {dates.map((_, dateIndex) => {
                                         const { isSelected, isInActiveSelection, availability } = getCellStatus(dateIndex, timeIndex);
@@ -690,18 +733,18 @@ export default function SchedulePage() {
                 
                 /* スクロールバーのスタイル調整 */
                 .calendar-container::-webkit-scrollbar {
-                    width: 8px;
-                    height: 8px;
+                    width: 6px;
+                    height: 6px;
                 }
                 
                 .calendar-container::-webkit-scrollbar-track {
                     background: var(--secondary);
-                    border-radius: 4px;
+                    border-radius: 3px;
                 }
                 
                 .calendar-container::-webkit-scrollbar-thumb {
                     background: var(--border);
-                    border-radius: 4px;
+                    border-radius: 3px;
                 }
                 
                 .calendar-container::-webkit-scrollbar-thumb:hover {
@@ -719,12 +762,44 @@ export default function SchedulePage() {
                     min-width: max-content;
                 }
                 
+                /* 固定ヘッダー */
+                .time-header {
+                    min-height: 1.5rem;
+                    min-width: 50px;
+                    padding: 0.25rem;
+                    font-size: 0.75rem;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                }
+                
+                .date-header {
+                    min-height: 1.5rem;
+                    min-width: 40px;
+                    padding: 0.25rem;
+                    font-size: 0.75rem;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                }
+                
+                .time-label {
+                    min-height: 1.2rem;
+                    min-width: 50px;
+                    padding: 0.125rem 0.25rem;
+                    font-size: 0.625rem;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                }
+                
                 .time-slot {
-                    min-height: 2.5rem;
-                    min-width: 80px;
+                    min-height: 1.2rem;
+                    min-width: 40px;
                     cursor: pointer;
                     transition: background-color 0.1s;
                     position: relative;
+                    border: 0.5px solid var(--border);
                 }
                 
                 .time-slot.selected {
@@ -759,9 +834,26 @@ export default function SchedulePage() {
                         max-height: 60vh;
                     }
                     
+                    .time-header {
+                        min-width: 45px;
+                        min-height: 1.2rem;
+                    }
+                    
+                    .date-header {
+                        min-width: 35px;
+                        min-height: 1.2rem;
+                        font-size: 0.625rem;
+                    }
+                    
+                    .time-label {
+                        min-width: 45px;
+                        min-height: 1rem;
+                        font-size: 0.5rem;
+                    }
+                    
                     .time-slot {
-                        min-width: 60px;
-                        min-height: 3rem;
+                        min-width: 35px;
+                        min-height: 1rem;
                     }
                 }
             `}</style>

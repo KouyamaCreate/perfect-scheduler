@@ -2,7 +2,6 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
-import Image from 'next/image';
 import { useParams, useSearchParams, useRouter } from 'next/navigation';
 import { doc, getDoc, collection, setDoc, onSnapshot, query, orderBy } from 'firebase/firestore';
 import { db } from '@/lib/firebase';

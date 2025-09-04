@@ -22,6 +22,7 @@ type Schedule = {
   description?: string;
   createdAt?: Date;
 };
+type ScheduleDoc = { name?: string; description?: string; createdAt?: { toDate?: () => Date } };
 
 export default function MyPage() {
   const { user, loading } = useAuth();
@@ -57,7 +58,7 @@ export default function MyPage() {
             };
           });
           setCreated(createdList);
-        } catch (e) {
+        } catch (_e) {
           // インデックス未作成などで失敗した場合は orderBy を外してリトライ
           const fallbackQ = query(
             collection(db, 'schedules'),

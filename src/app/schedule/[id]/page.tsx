@@ -162,7 +162,7 @@ export default function SchedulePage() {
                 const uid = (data.userId as string) || d.id;
                 byUid.set(uid, {
                     id: uid,
-                    name: data.name,
+                    name: data.name ?? '',
                     slots: Array.isArray(data?.slots) ? data.slots : [],
                 });
             });

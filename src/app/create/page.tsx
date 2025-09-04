@@ -3,13 +3,13 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import Image from 'next/image';
 import { v4 as uuidv4 } from 'uuid';
 import { doc, setDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 
 import { useAuth } from '@/contexts/AuthContext';
 import { AppHeader } from '@/components/AppHeader';
+import { InlineCalendar } from '@/components/InlineCalendar';
 
 export default function CreateSchedule() {
     const router = useRouter();
@@ -21,6 +21,8 @@ export default function CreateSchedule() {
     const [startTime, setStartTime] = useState('09:00');
     const [endTime, setEndTime] = useState('17:00');
     const [timeSlotDuration, setTimeSlotDuration] = useState('30');
+    const [excludeWeekends, setExcludeWeekends] = useState(false);
+    const [excludeWeekdays, setExcludeWeekdays] = useState(false);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -42,6 +44,8 @@ export default function CreateSchedule() {
                 startTime,
                 endTime,
                 duration: parseInt(timeSlotDuration),
+                excludeWeekends,
+                excludeWeekdays,
                 createdAt: new Date(),
                 creatorId: (user ?? { uid: null }).uid
             });
@@ -98,33 +102,47 @@ export default function CreateSchedule() {
                     <div className="bg-[var(--secondary)] p-6 rounded-lg mb-8">
                         <h2 className="text-xl font-semibold mb-4">日程と時間</h2>
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
                             <div>
                                 <label htmlFor="startDate" className="block font-medium mb-2">
                                     開始日 <span className="text-red-500">*</span>
                                 </label>
-                                <input
-                                    type="date"
-                                    id="startDate"
-                                    value={startDate}
-                                    onChange={(e) => setStartDate(e.target.value)}
-                                    className="input"
-                                    required
-                                />
+                                <div className="grid grid-cols-1 gap-3 items-start">
+                                    <input
+                                        type="date"
+                                        id="startDate"
+                                        value={startDate}
+                                        onChange={(e) => setStartDate(e.target.value)}
+                                        className="input"
+                                        required
+                                    />
+                                    <InlineCalendar
+                                        value={startDate}
+                                        onChange={setStartDate}
+                                        ariaLabel="開始日カレンダー"
+                                    />
+                                </div>
                             </div>
 
                             <div>
                                 <label htmlFor="endDate" className="block font-medium mb-2">
                                     終了日 <span className="text-red-500">*</span>
                                 </label>
-                                <input
-                                    type="date"
-                                    id="endDate"
-                                    value={endDate}
-                                    onChange={(e) => setEndDate(e.target.value)}
-                                    className="input"
-                                    required
-                                />
+                                <div className="grid grid-cols-1 gap-3 items-start">
+                                    <input
+                                        type="date"
+                                        id="endDate"
+                                        value={endDate}
+                                        onChange={(e) => setEndDate(e.target.value)}
+                                        className="input"
+                                        required
+                                    />
+                                    <InlineCalendar
+                                        value={endDate}
+                                        onChange={setEndDate}
+                                        ariaLabel="終了日カレンダー"
+                                    />
+                                </div>
                             </div>
                         </div>
 
@@ -173,6 +191,41 @@ export default function CreateSchedule() {
                                 <option value="30">30分</option>
                                 <option value="60">1時間</option>
                             </select>
+                        </div>
+
+                        <div className="mt-6">
+                            <h3 className="font-medium mb-2">期間の条件</h3>
+                            <div className="flex flex-col gap-2">
+                                <label className={`inline-flex items-center gap-2 ${excludeWeekdays ? 'opacity-50' : ''}`}>
+                                    <input
+                                        type="checkbox"
+                                        className="checkbox"
+                                        checked={excludeWeekends}
+                                        onChange={(e) => {
+                                            const checked = e.target.checked;
+                                            setExcludeWeekends(checked);
+                                            if (checked) setExcludeWeekdays(false);
+                                        }}
+                                        disabled={excludeWeekdays}
+                                    />
+                                    <span>1: 土日を除く（平日のみ）</span>
+                                </label>
+                                <label className={`inline-flex items-center gap-2 ${excludeWeekends ? 'opacity-50' : ''}`}>
+                                    <input
+                                        type="checkbox"
+                                        className="checkbox"
+                                        checked={excludeWeekdays}
+                                        onChange={(e) => {
+                                            const checked = e.target.checked;
+                                            setExcludeWeekdays(checked);
+                                            if (checked) setExcludeWeekends(false);
+                                        }}
+                                        disabled={excludeWeekends}
+                                    />
+                                    <span>2: 平日を除く（土日のみ）</span>
+                                </label>
+                            </div>
+                            <p className="text-xs opacity-70 mt-1">どちらか一方のみ選択できます。</p>
                         </div>
                     </div>
 

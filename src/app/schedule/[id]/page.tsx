@@ -32,6 +32,8 @@ export default function SchedulePage() {
         endTime: string;
         duration: number;
         createdAt: Date;
+        excludeWeekends?: boolean;
+        excludeWeekdays?: boolean;
     } | null>(null);
     const [username, setUsername] = useState('');
     const [selectedSlots, setSelectedSlots] = useState<string[]>([]);
@@ -109,7 +111,9 @@ export default function SchedulePage() {
                         startTime: data.startTime,
                         endTime: data.endTime,
                         duration: data.duration,
-                        createdAt: data.createdAt.toDate()
+                        createdAt: data.createdAt.toDate(),
+                        excludeWeekends: !!data.excludeWeekends,
+                        excludeWeekdays: !!data.excludeWeekdays,
                     });
                 } else {
                     setError('スケジュールが見つかりませんでした');
@@ -171,7 +175,18 @@ export default function SchedulePage() {
     }, [scheduleId, user, authLoading]);
 
     // 日付と時間スロットの配列を生成
-    const dates = scheduleData ? getDatesInRange(scheduleData.startDate, scheduleData.endDate) : [];
+    const dates = scheduleData ? (() => {
+        const base = getDatesInRange(scheduleData.startDate, scheduleData.endDate);
+        const exW = !!scheduleData.excludeWeekends;
+        const exWD = !!scheduleData.excludeWeekdays;
+        if (!exW && !exWD) return base;
+        return base.filter((d) => {
+            const dow = d.getDay(); // 0:日 6:土
+            if (exW) return dow !== 0 && dow !== 6; // 平日のみ
+            if (exWD) return dow === 0 || dow === 6; // 土日のみ
+            return true;
+        });
+    })() : [];
     const timeSlots = scheduleData ? getTimeSlots(scheduleData.startTime, scheduleData.endTime, scheduleData.duration) : [];
 
     // 参加者を追加する

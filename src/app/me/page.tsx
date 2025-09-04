@@ -46,11 +46,12 @@ export default function MyPage() {
             orderBy('createdAt', 'desc')
           );
           const createdSnap = await getDocs(createdQ);
+          type ScheduleDoc = { name?: string; description?: string; createdAt?: { toDate?: () => Date } };
           const createdList: Schedule[] = createdSnap.docs.map((d) => {
-            const data = d.data() as any;
+            const data = d.data() as ScheduleDoc;
             return {
               id: d.id,
-              name: data.name,
+              name: data.name ?? '',
               description: data.description,
               createdAt: data.createdAt?.toDate?.() ?? undefined,
             };
@@ -64,10 +65,10 @@ export default function MyPage() {
           );
           const snap = await getDocs(fallbackQ);
           const list: Schedule[] = snap.docs.map((d) => {
-            const data = d.data() as any;
+            const data = d.data() as ScheduleDoc;
             return {
               id: d.id,
-              name: data.name,
+              name: data.name ?? '',
               description: data.description,
               createdAt: data.createdAt?.toDate?.() ?? undefined,
             };
@@ -95,10 +96,10 @@ export default function MyPage() {
               const sref = doc(db, 'schedules', sid);
               const ssnap = await getDoc(sref);
               if (ssnap.exists()) {
-                const data = ssnap.data() as any;
+                const data = ssnap.data() as ScheduleDoc;
                 schedules.push({
                   id: sid,
-                  name: data.name,
+                  name: data.name ?? '',
                   description: data.description,
                   createdAt: data.createdAt?.toDate?.() ?? undefined,
                 });
@@ -113,18 +114,22 @@ export default function MyPage() {
           });
           setParticipating(schedules);
           setIndexRequired(false);
-        } catch (e: any) {
+        } catch (e: unknown) {
           // 単一フィールドインデックス未設定時のエラーに対処
-          const msg = String(e?.message || '');
+          const msg = (typeof e === 'object' && e && 'message' in e) ? String((e as { message?: unknown }).message || '') : '';
           if (msg.includes('COLLECTION_GROUP_ASC') || msg.includes('requires a COLLECTION_GROUP')) {
             setIndexRequired(true);
           } else {
             throw e;
           }
         }
-      } catch (e: any) {
-        console.error('Failed to load my page data:', e);
-        setError(e?.message || '読み込みに失敗しました');
+      } catch (_e: unknown) {
+        console.error('Failed to load my page data:', _e);
+        type WithMessage = { message?: unknown };
+        const msg = (typeof _e === 'object' && _e && 'message' in _e)
+          ? String(((_e as WithMessage).message) ?? '読み込みに失敗しました')
+          : '読み込みに失敗しました';
+        setError(msg);
       } finally {
         setBusy(false);
       }

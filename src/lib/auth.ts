@@ -42,9 +42,10 @@ export const signInWithGoogle = async (): Promise<User | null> => {
       });
     }
     return result.user;
-  } catch (error: any) {
+  } catch (error: unknown) {
     // ユーザーがポップアップを閉じた場合は静かに中断
-    if (error?.code === 'auth/popup-closed-by-user') {
+    const code = (typeof error === 'object' && error && 'code' in error) ? (error as { code?: string }).code : undefined;
+    if (code === 'auth/popup-closed-by-user') {
       return null;
     }
     // 既存アカウントなどの他エラー
@@ -55,7 +56,6 @@ export const signInWithGoogle = async (): Promise<User | null> => {
 
 // ポップアップがブロックされる環境用のリダイレクト方式
 export const signInWithGoogleRedirect = async (): Promise<void> => {
-  const current = auth.currentUser;
   try {
     try { sessionStorage.setItem('ps_redirect_pending', '1'); } catch {}
     // 常に通常のリダイレクトサインイン（匿名からのリンクは行わない）
@@ -84,7 +84,7 @@ export const completeGoogleRedirectIfPresent = async (): Promise<User | null> =>
     }
     try { sessionStorage.removeItem('ps_redirect_pending'); } catch {}
     return user;
-  } catch (e) {
+  } catch (_e) {
     try { sessionStorage.removeItem('ps_redirect_pending'); } catch {}
     // リダイレクト未実行時などはここに来ないか、nullになる
     return null;

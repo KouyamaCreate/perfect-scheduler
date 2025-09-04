@@ -157,8 +157,9 @@ export default function SchedulePage() {
         const unsubscribe = onSnapshot(participantsQuery, (snapshot) => {
             // UID（userId or docId）ごとに単純に最新状態を反映（マージは行わない）
             const byUid = new Map<string, { id: string; name: string; slots: string[] }>();
+            type ParticipantDoc = { userId?: string; name?: string; slots?: string[] };
             snapshot.docs.forEach((d) => {
-                const data = d.data() as any;
+                const data = d.data() as ParticipantDoc;
                 const uid = (data.userId as string) || d.id;
                 byUid.set(uid, {
                     id: uid,
@@ -764,13 +765,13 @@ export default function SchedulePage() {
                                         id="username"
                                         value={username}
                                         onChange={(e) => setUsername(e.target.value)}
-                                        disabled={Boolean(user && participants.find(p => p.id === (user as any).uid))}
-                                        className={`input ${Boolean(user && participants.find(p => p.id === (user as any).uid)) ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : ''}`}
-                                        title={Boolean(user && participants.find(p => p.id === (user as any).uid)) ? 'このイベントでは氏名は固定されています' : undefined}
+                                        disabled={Boolean(user?.uid && participants.find(p => p.id === user?.uid))}
+                                        className={`input ${Boolean(user?.uid && participants.find(p => p.id === user?.uid)) ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : ''}`}
+                                        title={Boolean(user?.uid && participants.find(p => p.id === user?.uid)) ? 'このイベントでは氏名は固定されています' : undefined}
                                         placeholder="名前を入力"
                                         required
                                     />
-                                    {Boolean(user && participants.find(p => p.id === (user as any).uid)) && (
+                                    {Boolean(user?.uid && participants.find(p => p.id === user?.uid)) && (
                                         <p className="text-sm opacity-70 mt-1">このイベントでは氏名は固定されています</p>
                                     )}
                                 </div>

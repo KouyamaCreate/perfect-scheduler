@@ -1,8 +1,8 @@
 'use client';
 
 import React, { useState, useEffect, Suspense } from 'react';
-import Link from 'next/link';
-import Image from 'next/image';
+// import Link from 'next/link';
+// import Image from 'next/image';
 import { useSearchParams } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { LoginModal } from '@/components/LoginModal';
@@ -610,13 +610,13 @@ function ScheduleDemoContent() {
                                         id="username"
                                         value={username}
                                         onChange={(e) => setUsername(e.target.value)}
-                                        disabled={Boolean(user && participants.find(p => p.id === (user as any).uid))}
-                                        className={`input ${Boolean(user && participants.find(p => p.id === (user as any).uid)) ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : ''}`}
-                                        title={Boolean(user && participants.find(p => p.id === (user as any).uid)) ? 'このイベントでは氏名は固定されています' : undefined}
+                                        disabled={Boolean(user?.uid && participants.find(p => p.id === user?.uid))}
+                                        className={`input ${Boolean(user?.uid && participants.find(p => p.id === user?.uid)) ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : ''}`}
+                                        title={Boolean(user?.uid && participants.find(p => p.id === user?.uid)) ? 'このイベントでは氏名は固定されています' : undefined}
                                         placeholder="名前を入力"
                                         required
                                     />
-                                    {Boolean(user && participants.find(p => p.id === (user as any).uid)) && (
+                                    {Boolean(user?.uid && participants.find(p => p.id === user?.uid)) && (
                                         <p className="text-sm opacity-70 mt-1">このイベントでは氏名は固定されています</p>
                                     )}
                                 </div>

@@ -7,14 +7,14 @@ import { useAuth } from '@/contexts/AuthContext';
 import { getUserDisplayName } from '@/lib/auth';
 
 export const AppHeader: React.FC = () => {
-  const { user, isAnonymous, loading, logout } = useAuth();
+  const { user, isAnonymous, loading: _loading, logout } = useAuth();
   const [showDropdown, setShowDropdown] = useState(false);
 
   const handleLogout = async () => {
     try {
       await logout();
       setShowDropdown(false);
-    } catch (e) {
+    } catch (_e) {
       // noop
     }
   };

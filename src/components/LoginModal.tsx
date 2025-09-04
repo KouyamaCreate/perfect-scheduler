@@ -69,13 +69,14 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       await signInWithGoogle();
       console.log('✅ Googleログイン成功');
       onClose();
-    } catch (err: any) {
+    } catch (err: unknown) {
       // ポップアップが閉じられた/ブロックされた場合は、自動フォールバックせずユーザーに案内
-      if (err?.code === 'auth/popup-closed-by-user') {
+      const code = (typeof err === 'object' && err && 'code' in err) ? (err as { code?: string }).code : undefined;
+      if (code === 'auth/popup-closed-by-user') {
         setError('ログインがキャンセルされました。ポップアップが使えない場合は「リダイレクトでGoogleログイン」をお試しください。');
         return;
       }
-      if (err?.code === 'auth/popup-blocked') {
+      if (code === 'auth/popup-blocked') {
         setError('ポップアップがブロックされました。「リダイレクトでGoogleログイン」をお試しください。');
         return;
       }

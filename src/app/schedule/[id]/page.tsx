@@ -3,8 +3,8 @@
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
-import { useParams } from 'next/navigation';
-import { doc, getDoc, collection, addDoc, onSnapshot, query, orderBy } from 'firebase/firestore';
+import { useParams, useSearchParams, useRouter } from 'next/navigation';
+import { doc, getDoc, collection, setDoc, onSnapshot, query, orderBy } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/AuthContext';
 import { LoginModal } from '@/components/LoginModal';
@@ -12,7 +12,11 @@ import { getUserDisplayName } from '@/lib/auth';
 
 export default function SchedulePage() {
     const params = useParams();
+    const searchParams = useSearchParams();
+    const router = useRouter();
     const scheduleId = params.id as string;
+    // 既定は編集モード。?mode=view のときのみ閲覧モード
+    const isEditMode = (searchParams.get('mode') !== 'view');
     const { user, loading: authLoading, signInAnonymously } = useAuth();
 
     // 状態管理
@@ -30,7 +34,8 @@ export default function SchedulePage() {
     } | null>(null);
     const [username, setUsername] = useState('');
     const [selectedSlots, setSelectedSlots] = useState<string[]>([]);
-    const [participants, setParticipants] = useState<{ name: string, slots: string[] }[]>([]);
+    const [slotsInitialized, setSlotsInitialized] = useState(false);
+    const [participants, setParticipants] = useState<{ id: string; name: string; slots: string[] }[]>([]);
     const [shareLink, setShareLink] = useState('');
     const [copied, setCopied] = useState(false);
     const [showLoginModal, setShowLoginModal] = useState(false);
@@ -62,16 +67,32 @@ export default function SchedulePage() {
         }
     }, [authLoading, user, signInAnonymously]);
 
-    // ユーザー名の自動設定（別のuseEffectで分離してHydration問題を回避）
+    // ユーザー名と選択済みスロットの初期化（既存参加者なら固定＆引き継ぎ）
     useEffect(() => {
-        if (user && !username) {
-            // 認証済みユーザーの場合、自動的にユーザー名を設定
+        if (!user) return;
+        const me = participants.find((p) => p.id === user.uid);
+        if (me) {
+            if (me.name && username !== me.name) {
+                setUsername(me.name);
+            }
+            // 以前の選択を今回の入力に反映（初回のみ or 未選択時）
+            if (!slotsInitialized && selectedSlots.length === 0 && me.slots && me.slots.length > 0) {
+                setSelectedSlots(me.slots);
+                setSlotsInitialized(true);
+            }
+            return;
+        }
+        if (!username) {
+            // 初回は表示名を初期値としてセット
             setUsername(getUserDisplayName(user));
         }
-    }, [user, username]);
+    }, [user, username, participants, slotsInitialized, selectedSlots.length]);
 
     // スケジュールデータの取得
     useEffect(() => {
+        // 認証が完了してから読み取り（Firestore ルール対策）
+        if (authLoading || !user) return;
+
         const fetchScheduleData = async () => {
             try {
                 const scheduleRef = doc(db, 'schedules', scheduleId);
@@ -101,28 +122,74 @@ export default function SchedulePage() {
         };
 
         fetchScheduleData();
-    }, [scheduleId]);
+    }, [scheduleId, user, authLoading]);
 
-    // 参加者データのリアルタイム取得
+    // 初回アクセス時、既に回答済みなら一覧（view）にリダイレクト
     useEffect(() => {
-        if (!scheduleId) return;
+        if (authLoading || !user || !scheduleId) return;
+        const modeParam = searchParams.get('mode');
+        // 明示的に mode=edit/view が指定されていれば尊重
+        if (modeParam === 'edit' || modeParam === 'view') return;
+
+        const participantRef = doc(db, 'schedules', scheduleId, 'participants', user.uid);
+        getDoc(participantRef).then((snap) => {
+            if (snap.exists()) {
+                router.replace(`/schedule/${scheduleId}?mode=view`);
+            }
+        }).catch((e) => {
+            console.error('failed to check participant doc:', e);
+        });
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [authLoading, user, scheduleId]);
+
+    // 参加者データのリアルタイム取得（認証後に購読開始）
+    useEffect(() => {
+        if (!scheduleId || authLoading || !user) return;
 
         const participantsRef = collection(db, 'schedules', scheduleId, 'participants');
         const participantsQuery = query(participantsRef, orderBy('createdAt', 'asc'));
 
         const unsubscribe = onSnapshot(participantsQuery, (snapshot) => {
-            const participantsData = snapshot.docs.map(doc => ({
-                id: doc.id,
-                name: doc.data().name,
-                slots: doc.data().slots || []
-            }));
-            setParticipants(participantsData);
+            // 現在のユーザーの旧匿名UIDがあれば、同一人物としてマージ
+            let mergedAnonUid: string | null = null;
+            try { mergedAnonUid = localStorage.getItem('ps_mergedAnonUid'); } catch {}
+
+            const byUid = new Map<string, { id: string; name: string; slots: string[] }>();
+            snapshot.docs.forEach((d) => {
+                const data = d.data() as any;
+                const uid = (data.userId as string) || d.id;
+
+                // 表示上のキー決定：自分の旧匿名UIDは現在のUIDに統合
+                let key = uid;
+                if (user && mergedAnonUid && uid === mergedAnonUid) {
+                    key = user.uid;
+                }
+
+                const existing = byUid.get(key);
+                const incomingSlots: string[] = Array.isArray(data?.slots) ? data.slots : [];
+                if (existing) {
+                    // スロットはユニオン。名前は既存優先
+                    const mergedSlots = Array.from(new Set([...(existing.slots || []), ...incomingSlots]));
+                    byUid.set(key, {
+                        id: key,
+                        name: existing.name || data.name,
+                        slots: mergedSlots,
+                    });
+                } else {
+                    byUid.set(key, {
+                        id: key,
+                        name: data.name,
+                        slots: incomingSlots,
+                    });
+                }
+            });
+            setParticipants(Array.from(byUid.values()));
         }, (err) => {
             console.error('Error getting participants:', err);
         });
 
         return () => unsubscribe();
-    }, [scheduleId]);
+    }, [scheduleId, user, authLoading]);
 
     // 日付と時間スロットの配列を生成
     const dates = scheduleData ? getDatesInRange(scheduleData.startDate, scheduleData.endDate) : [];
@@ -141,20 +208,29 @@ export default function SchedulePage() {
         if (!username || selectedSlots.length === 0) return;
 
         try {
-            const participantData = {
-                name: username,
-                slots: [...selectedSlots],
-                createdAt: new Date(),
-                userId: user.uid // ユーザーIDを追加
-            };
+            // ドキュメントIDを user.uid に固定し、同一ユーザーを一意化
+            const participantRef = doc(db, 'schedules', scheduleId, 'participants', user.uid);
 
-            await addDoc(collection(db, 'schedules', scheduleId, 'participants'), participantData);
+            // 既存ドキュメントがあればその氏名を維持（固定）
+            const existingSnap = await getDoc(participantRef);
+            const fixedName = existingSnap.exists() ? (existingSnap.data().name as string) : username;
 
-            // 匿名ユーザーの場合はフォームをクリアしない（再利用のため）
-            if (!user.isAnonymous) {
-                setUsername('');
+            await setDoc(
+                participantRef,
+                {
+                    userId: user.uid,
+                    name: fixedName,
+                    slots: [...selectedSlots],
+                    createdAt: existingSnap.exists() ? existingSnap.data().createdAt ?? new Date() : new Date(),
+                    updatedAt: new Date(),
+                },
+                { merge: true }
+            );
+
+            // 編集モードでは保存後に一覧ページへ戻す
+            if (isEditMode) {
+                router.push(`/schedule/${scheduleId}?mode=view`);
             }
-            setSelectedSlots([]);
         } catch (err) {
             console.error('Error adding participant:', err);
             alert('参加情報の登録中にエラーが発生しました');
@@ -163,6 +239,7 @@ export default function SchedulePage() {
 
     // セルをクリックした時の処理（選択開始）
     const handleCellMouseDown = (dateIndex: number, timeIndex: number, e: React.MouseEvent) => {
+        if (!isEditMode) return; // 一覧ページでは編集不可
         e.preventDefault();
 
         const slotId = `${dateIndex}-${timeIndex}`;
@@ -191,6 +268,7 @@ export default function SchedulePage() {
 
     // マウス移動時の処理（セル上）
     const handleCellMouseEnter = (dateIndex: number, timeIndex: number) => {
+        if (!isEditMode) return; // 一覧ページでは編集不可
         if (!isSelecting) return;
 
         // ドラッグ開始フラグを立てる
@@ -205,6 +283,7 @@ export default function SchedulePage() {
 
     // タッチ開始時
     const handleCellTouchStart = (dateIndex: number, timeIndex: number, e: React.TouchEvent) => {
+        if (!isEditMode) return; // 一覧ページでは編集不可
         // シングルタッチのみ処理
         if (e.touches.length !== 1) return;
         
@@ -432,17 +511,21 @@ export default function SchedulePage() {
         }
     }, [selectionCurrentPoint, isSelecting, dragStarted, selectionType, isAdding, selectedSlots]);
 
-    // シェアリンクをコピーする
+    // シェアリンクをコピーする（クエリなしの基本URLをコピー）
     const copyShareLink = () => {
-        navigator.clipboard.writeText(window.location.href);
+        const baseUrl = `${window.location.origin}/schedule/${scheduleId}`;
+        navigator.clipboard.writeText(baseUrl);
+        setShareLink(baseUrl);
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
     };
 
-    // コンポーネントがマウントされた時にシェアリンクを設定
+    // シェアリンクは常にクエリのない基本URLを表示
     useEffect(() => {
-        setShareLink(window.location.href);
-    }, []);
+        if (!scheduleId) return;
+        const baseUrl = `${window.location.origin}/schedule/${scheduleId}`;
+        setShareLink(baseUrl);
+    }, [scheduleId]);
 
     if (loading) {
         return (
@@ -558,7 +641,10 @@ export default function SchedulePage() {
                                         <div className="text-xs font-medium">{time}</div>
                                     </div>
                                     {dates.map((_, dateIndex) => {
-                                        const { isSelected, isInActiveSelection, availability } = getCellStatus(dateIndex, timeIndex);
+                                        const baseStatus = getCellStatus(dateIndex, timeIndex);
+                                        const isSelected = isEditMode ? baseStatus.isSelected : false;
+                                        const isInActiveSelection = isEditMode ? baseStatus.isInActiveSelection : false;
+                                        const availability = baseStatus.availability;
 
                                         const cellClassName = `
                                             time-slot 
@@ -573,7 +659,7 @@ export default function SchedulePage() {
 
                                         // 参加可能人数に応じた色を計算
                                         let availabilityColor = '';
-                                        if (availability > 0 && !isSelected && !isInActiveSelection) {
+                                        if (availability > 0 && !(isSelected || isInActiveSelection)) {
                                             // 最大5段階のグラデーション
                                             const maxSteps = Math.min(5, participants.length);
 
@@ -643,10 +729,12 @@ export default function SchedulePage() {
                         </div>
 
                         <div className="flex flex-wrap items-center gap-4 mb-8">
-                            <div className="flex items-center gap-2">
-                                <div className="w-4 h-4 bg-[var(--primary)]"></div>
-                                <span className="text-sm">あなたの選択</span>
-                            </div>
+                            {isEditMode && (
+                              <div className="flex items-center gap-2">
+                                  <div className="w-4 h-4 bg-[var(--primary)]"></div>
+                                  <span className="text-sm">あなたの選択</span>
+                              </div>
+                            )}
                             <div className="flex items-center gap-2">
                                 <div className="w-4 h-4" style={{ backgroundColor: maxColor }}></div>
                                 <span className="text-sm">最大参加可能（5人または全員）</span>
@@ -685,7 +773,8 @@ export default function SchedulePage() {
                     {/* 参加者登録部分 */}
                     <div>
                         <div className="bg-[var(--secondary)] p-4 rounded-lg mb-6">
-                            <h2 className="text-xl font-semibold mb-4">参加情報を入力</h2>
+                            <h2 className="text-xl font-semibold mb-4">{isEditMode ? '参加情報を編集' : '参加情報'}</h2>
+                            {isEditMode ? (
                             <form onSubmit={handleAddParticipant}>
                                 <div className="mb-4">
                                     <label htmlFor="username" className="block font-medium mb-2">
@@ -696,10 +785,15 @@ export default function SchedulePage() {
                                         id="username"
                                         value={username}
                                         onChange={(e) => setUsername(e.target.value)}
-                                        className="input"
+                                        disabled={Boolean(user && participants.find(p => p.id === (user as any).uid))}
+                                        className={`input ${Boolean(user && participants.find(p => p.id === (user as any).uid)) ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : ''}`}
+                                        title={Boolean(user && participants.find(p => p.id === (user as any).uid)) ? 'このイベントでは氏名は固定されています' : undefined}
                                         placeholder="名前を入力"
                                         required
                                     />
+                                    {Boolean(user && participants.find(p => p.id === (user as any).uid)) && (
+                                        <p className="text-sm opacity-70 mt-1">このイベントでは氏名は固定されています</p>
+                                    )}
                                 </div>
 
                                 <div className="mb-4">
@@ -718,7 +812,16 @@ export default function SchedulePage() {
                                 >
                                     参加情報を登録
                                 </button>
+                                <div className="mt-3 text-center">
+                                    <button type="button" className="text-sm text-[var(--foreground)] underline" onClick={() => router.push(`/schedule/${scheduleId}?mode=view`)}>一覧に戻る</button>
+                                </div>
                             </form>
+                            ) : (
+                                <div className="flex items-center justify-between">
+                                    <p className="opacity-80">あなたの回答を編集するには編集ページへ移動してください。</p>
+                                    <button className="btn btn-secondary" onClick={() => router.push(`/schedule/${scheduleId}?mode=edit`)}>回答を編集</button>
+                                </div>
+                            )}
                         </div>
 
                         <div className="bg-[var(--secondary)] p-4 rounded-lg mb-6">
@@ -748,8 +851,8 @@ export default function SchedulePage() {
                             <h2 className="text-xl font-semibold mb-4">参加者一覧 ({participants.length})</h2>
                             {participants.length > 0 ? (
                                 <ul className="space-y-2">
-                                    {participants.map((participant, index) => (
-                                        <li key={index} className="flex items-center justify-between">
+                                    {participants.map((participant) => (
+                                        <li key={participant.id} className="flex items-center justify-between">
                                             <div>
                                                 <span className="font-medium">{participant.name}</span>
                                                 <span className="text-sm opacity-70 ml-2">
@@ -964,7 +1067,7 @@ function formatDate(date: Date): string {
     return `${month}/${day} (${weekday})`;
 }
 
-function getAvailability(participants: { name: string, slots: string[] }[], slotId: string): number {
+function getAvailability(participants: { id: string; name: string; slots: string[] }[], slotId: string): number {
     return participants.filter(p => p.slots.includes(slotId)).length;
 }
 

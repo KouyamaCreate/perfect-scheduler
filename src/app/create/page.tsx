@@ -8,8 +8,11 @@ import { v4 as uuidv4 } from 'uuid';
 import { doc, setDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 
+import { useAuth } from '@/contexts/AuthContext';
+
 export default function CreateSchedule() {
     const router = useRouter();
+    const { user, signInAnonymously } = useAuth();
     const [eventName, setEventName] = useState('');
     const [description, setDescription] = useState('');
     const [startDate, setStartDate] = useState('');
@@ -22,6 +25,10 @@ export default function CreateSchedule() {
         e.preventDefault();
 
         try {
+            // 未認証であれば匿名サインイン（Firestore ルール対策）
+            if (!user) {
+                await signInAnonymously();
+            }
             // ユニークIDを生成
             const scheduleId = uuidv4();
 
@@ -34,7 +41,8 @@ export default function CreateSchedule() {
                 startTime,
                 endTime,
                 duration: parseInt(timeSlotDuration),
-                createdAt: new Date()
+                createdAt: new Date(),
+                creatorId: (user ?? { uid: null }).uid
             });
 
             // スケジュールページに移動

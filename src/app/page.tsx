@@ -3,7 +3,7 @@ import Link from "next/link";
 
 export default function Home() {
   return (
-    <div className="flex flex-col min-h-screen">
+    <div className="flex flex-col min-h-screen" suppressHydrationWarning>
       {/* ヘッダー */}
       <header className="border-b border-[var(--border)]">
         <div className="container flex justify-between items-center py-4">
@@ -26,7 +26,7 @@ export default function Home() {
             >
               使い方
             </Link>
-            <Link href="/login" className="btn btn-secondary">
+            <Link prefetch={false} href="/login" className="btn btn-secondary">
               ログイン
             </Link>
             <Link href="/create" className="btn btn-primary">
@@ -56,7 +56,7 @@ export default function Home() {
                   <Link href="/create" className="btn btn-primary">
                     スケジュールを作成する
                   </Link>
-                  <Link href="/demo" className="btn btn-secondary">
+                  <Link href="/schedule/demo" className="btn btn-secondary">
                     デモを見る
                   </Link>
                 </div>

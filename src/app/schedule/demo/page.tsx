@@ -25,7 +25,8 @@ function ScheduleDemoContent() {
     // 状態管理
     const [username, setUsername] = useState('');
     const [selectedSlots, setSelectedSlots] = useState<string[]>([]);
-    const [participants, setParticipants] = useState<{ name: string, slots: string[] }[]>([]);
+    const [participants, setParticipants] = useState<{ id: string; name: string; slots: string[] }[]>([]);
+    const [slotsInitialized, setSlotsInitialized] = useState(false);
     const [shareLink, setShareLink] = useState('');
     const [copied, setCopied] = useState(false);
     const [showLoginModal, setShowLoginModal] = useState(false);
@@ -61,13 +62,24 @@ function ScheduleDemoContent() {
         }
     }, [authLoading, user, signInAnonymously]);
 
-    // ユーザー名の自動設定（別のuseEffectで分離してHydration問題を回避）
+    // ユーザー名の自動設定（同一ユーザーは保存済み氏名で固定）とスロット引き継ぎ
     useEffect(() => {
-        if (user && !username) {
-            // 認証済みユーザーの場合、自動的にユーザー名を設定
+        if (!user) return;
+        const me = participants.find(p => p.id === user.uid);
+        if (me) {
+            if (me.name && username !== me.name) {
+                setUsername(me.name);
+            }
+            if (!slotsInitialized && selectedSlots.length === 0 && me.slots && me.slots.length > 0) {
+                setSelectedSlots(me.slots);
+                setSlotsInitialized(true);
+            }
+            return;
+        }
+        if (!username) {
             setUsername(getUserDisplayName(user));
         }
-    }, [user, username]);
+    }, [user, username, participants, slotsInitialized, selectedSlots.length]);
 
     // 参加者を追加する
     const handleAddParticipant = (e: React.FormEvent) => {
@@ -81,16 +93,19 @@ function ScheduleDemoContent() {
 
         if (!username || selectedSlots.length === 0) return;
 
-        setParticipants([...participants, {
-            name: username,
-            slots: [...selectedSlots]
-        }]);
+        // 同一ユーザー（UID）で一意化。既存があれば氏名は保持し、スロットを更新
+        setParticipants(prev => {
+            const idx = prev.findIndex(p => p.id === user.uid);
+            if (idx >= 0) {
+                const fixedName = prev[idx].name;
+                const updated = [...prev];
+                updated[idx] = { id: user.uid, name: fixedName, slots: [...selectedSlots] };
+                return updated;
+            }
+            return [...prev, { id: user.uid, name: username, slots: [...selectedSlots] }];
+        });
 
-        // 匿名ユーザーの場合はユーザー名をクリアしない（再利用のため）
-        if (!user.isAnonymous) {
-            setUsername('');
-        }
-        setSelectedSlots([]);
+        // デモではクリアせず、直前の回答を保持
     };
 
     // セルをクリックした時の処理（選択開始）
@@ -609,10 +624,15 @@ function ScheduleDemoContent() {
                                         id="username"
                                         value={username}
                                         onChange={(e) => setUsername(e.target.value)}
-                                        className="input"
+                                        disabled={Boolean(user && participants.find(p => p.id === (user as any).uid))}
+                                        className={`input ${Boolean(user && participants.find(p => p.id === (user as any).uid)) ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : ''}`}
+                                        title={Boolean(user && participants.find(p => p.id === (user as any).uid)) ? 'このイベントでは氏名は固定されています' : undefined}
                                         placeholder="名前を入力"
                                         required
                                     />
+                                    {Boolean(user && participants.find(p => p.id === (user as any).uid)) && (
+                                        <p className="text-sm opacity-70 mt-1">このイベントでは氏名は固定されています</p>
+                                    )}
                                 </div>
 
                                 <div className="mb-4">
@@ -661,8 +681,8 @@ function ScheduleDemoContent() {
                             <h2 className="text-xl font-semibold mb-4">参加者一覧 ({participants.length})</h2>
                             {participants.length > 0 ? (
                                 <ul className="space-y-2">
-                                    {participants.map((participant, index) => (
-                                        <li key={index} className="flex items-center justify-between">
+                                    {participants.map((participant) => (
+                                        <li key={participant.id} className="flex items-center justify-between">
                                             <div>
                                                 <span className="font-medium">{participant.name}</span>
                                                 <span className="text-sm opacity-70 ml-2">
@@ -886,7 +906,7 @@ function formatDate(date: Date): string {
     return `${month}/${day} (${weekday})`;
 }
 
-function getAvailability(participants: { name: string, slots: string[] }[], slotId: string): number {
+function getAvailability(participants: { id: string; name: string; slots: string[] }[], slotId: string): number {
     return participants.filter(p => p.slots.includes(slotId)).length;
 }
 

@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import Image from 'next/image';
+import Link from 'next/link';
 import { useAuth } from '@/contexts/AuthContext';
 import { getUserDisplayName } from '@/lib/auth';
 
@@ -64,7 +65,7 @@ export const AuthHeader: React.FC = () => {
             </button>
 
             {showDropdown && (
-              <div className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg py-1 z-50">
+              <div className="absolute right-0 mt-2 w-56 bg-white rounded-md shadow-lg py-1 z-50">
                 <div className="px-4 py-2 text-sm text-gray-700 border-b border-gray-100">
                   <div className="font-medium">
                     {getUserDisplayName(user)}
@@ -73,6 +74,13 @@ export const AuthHeader: React.FC = () => {
                     {isAnonymous ? '匿名ユーザー' : user.email}
                   </div>
                 </div>
+                <Link
+                  href="/me"
+                  className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                  onClick={() => setShowDropdown(false)}
+                >
+                  マイページ
+                </Link>
                 <button
                   onClick={handleLogout}
                   className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"

@@ -2,13 +2,14 @@
 
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User } from 'firebase/auth';
-import { onAuthStateChange, signInAsAnonymous, signInWithGoogle, logout } from '@/lib/auth';
+import { onAuthStateChange, signInAsAnonymous, signInWithGoogle, logout, signInWithGoogleRedirect, completeGoogleRedirectIfPresent } from '@/lib/auth';
 
 interface AuthContextType {
   user: User | null;
   loading: boolean;
   signInAnonymously: () => Promise<void>;
   signInWithGoogle: () => Promise<void>;
+  signInWithGoogleRedirect: () => Promise<void>;
   logout: () => Promise<void>;
   isAnonymous: boolean;
 }
@@ -32,9 +33,35 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChange((user) => {
-      setUser(user);
-      setLoading(false);
+    // リダイレクト方式で戻ってきた場合の後処理（プロフィール同期/移行）
+    completeGoogleRedirectIfPresent().catch(() => {});
+
+    // 認証状態を監視し、未認証なら自動で匿名サインイン
+    const unsubscribe = onAuthStateChange(async (currentUser) => {
+      if (currentUser) {
+        setUser(currentUser);
+        setLoading(false);
+        // 匿名ユーザーなら旧UIDとして保存（マイグレーション用）
+        if (typeof window !== 'undefined' && currentUser.isAnonymous) {
+          try { localStorage.setItem('ps_lastAnonUid', currentUser.uid); } catch {}
+        }
+        return;
+      }
+
+      try {
+        // リダイレクト処理中フラグがある場合は匿名サインインを保留
+        let redirectPending = false;
+        try { redirectPending = sessionStorage.getItem('ps_redirect_pending') === '1'; } catch {}
+        if (!redirectPending) {
+          // まだ未認証の場合は匿名サインインを実行
+          await signInAsAnonymous();
+        }
+        // onAuthStateChanged が再度発火して user がセットされる
+      } catch (error) {
+        console.error('❌ AuthContext: 自動匿名サインインに失敗しました:', error);
+        // フォールバックして UI を利用可能にする
+        setLoading(false);
+      }
     });
 
     return () => unsubscribe();
@@ -85,6 +112,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     loading,
     signInAnonymously: handleSignInAnonymously,
     signInWithGoogle: handleSignInWithGoogle,
+    signInWithGoogleRedirect: () => signInWithGoogleRedirect(),
     logout: handleLogout,
     isAnonymous: user?.isAnonymous ?? false,
   };

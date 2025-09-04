@@ -28,6 +28,7 @@ export default function MyPage() {
   const [participating, setParticipating] = useState<Schedule[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [indexRequired, setIndexRequired] = useState(false);
 
   useEffect(() => {
     if (loading || !user) return;
@@ -74,41 +75,52 @@ export default function MyPage() {
         }
 
         // 参加中のスケジュール（collectionGroupで横断検索）
-        const participantsQ = query(
-          collectionGroup(db, 'participants'),
-          where('userId', '==', uid)
-        );
-        const participantsSnap = await getDocs(participantsQ);
-        // scheduleId を集めて重複排除
-        const scheduleIds = new Set<string>();
-        participantsSnap.docs.forEach((pd) => {
-          const parentSchedule = pd.ref.parent.parent;
-          if (parentSchedule) scheduleIds.add(parentSchedule.id);
-        });
-        // 該当スケジュールをまとめて取得
-        const schedules: Schedule[] = [];
-        await Promise.all(
-          Array.from(scheduleIds).map(async (sid) => {
-            const sref = doc(db, 'schedules', sid);
-            const ssnap = await getDoc(sref);
-            if (ssnap.exists()) {
-              const data = ssnap.data() as any;
-              schedules.push({
-                id: sid,
-                name: data.name,
-                description: data.description,
-                createdAt: data.createdAt?.toDate?.() ?? undefined,
-              });
-            }
-          })
-        );
-        // 新しい順に並べ替え
-        schedules.sort((a, b) => {
-          const at = a.createdAt?.getTime?.() ?? 0;
-          const bt = b.createdAt?.getTime?.() ?? 0;
-          return bt - at;
-        });
-        setParticipating(schedules);
+        try {
+          const participantsQ = query(
+            collectionGroup(db, 'participants'),
+            where('userId', '==', uid)
+          );
+          const participantsSnap = await getDocs(participantsQ);
+          // scheduleId を集めて重複排除
+          const scheduleIds = new Set<string>();
+          participantsSnap.docs.forEach((pd) => {
+            const parentSchedule = pd.ref.parent.parent;
+            if (parentSchedule) scheduleIds.add(parentSchedule.id);
+          });
+          // 該当スケジュールをまとめて取得
+          const schedules: Schedule[] = [];
+          await Promise.all(
+            Array.from(scheduleIds).map(async (sid) => {
+              const sref = doc(db, 'schedules', sid);
+              const ssnap = await getDoc(sref);
+              if (ssnap.exists()) {
+                const data = ssnap.data() as any;
+                schedules.push({
+                  id: sid,
+                  name: data.name,
+                  description: data.description,
+                  createdAt: data.createdAt?.toDate?.() ?? undefined,
+                });
+              }
+            })
+          );
+          // 新しい順に並べ替え
+          schedules.sort((a, b) => {
+            const at = a.createdAt?.getTime?.() ?? 0;
+            const bt = b.createdAt?.getTime?.() ?? 0;
+            return bt - at;
+          });
+          setParticipating(schedules);
+          setIndexRequired(false);
+        } catch (e: any) {
+          // 単一フィールドインデックス未設定時のエラーに対処
+          const msg = String(e?.message || '');
+          if (msg.includes('COLLECTION_GROUP_ASC') || msg.includes('requires a COLLECTION_GROUP')) {
+            setIndexRequired(true);
+          } else {
+            throw e;
+          }
+        }
       } catch (e: any) {
         console.error('Failed to load my page data:', e);
         setError(e?.message || '読み込みに失敗しました');
@@ -170,9 +182,25 @@ export default function MyPage() {
 
       <section>
         <h2 className="text-xl font-semibold mb-3">参加中のスケジュール ({participating.length})</h2>
-        {participating.length === 0 ? (
+        {indexRequired && (
+          <div className="mb-4 p-3 bg-yellow-100 border border-yellow-300 text-yellow-800 rounded">
+            参加中のスケジュールを表示するには、Firestore の単一フィールドインデックスが必要です。<br />
+            Firebase Console で <code>participants</code> コレクショングループの <code>userId</code> をインデックス対象にしてください。
+            <div className="mt-2">
+              <a
+                href="https://console.firebase.google.com/v1/r/project/perfect-scheduler-410a0/firestore/indexes?create_exemption=CmBwcm9qZWN0cy9wZXJmZWN0LXNjaGVkdWxlci00MTBhMC9kYXRhYmFzZXMvKGRlZmF1bHQpL2NvbGxlY3Rpb25Hcm91cHMvcGFydGljaXBhbnRzL2ZpZWxkcy91c2VySWQQAhoKCgZ1c2VySWQQAQ"
+                target="_blank"
+                rel="noreferrer"
+                className="underline text-[var(--primary)]"
+              >
+                コンソールで作成（推奨のショートカット）
+              </a>
+            </div>
+          </div>
+        )}
+        {participating.length === 0 && !indexRequired ? (
           <p className="opacity-70">まだ参加中のスケジュールはありません</p>
-        ) : (
+        ) : (!indexRequired && (
           <ul className="space-y-2">
             {participating.map((s) => (
               <li key={s.id} className="flex items-center justify-between p-3 rounded border border-[var(--border)] bg-[var(--secondary)]">
@@ -186,9 +214,8 @@ export default function MyPage() {
               </li>
             ))}
           </ul>
-        )}
+        ))}
       </section>
     </main>
   );
 }
-

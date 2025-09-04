@@ -150,38 +150,16 @@ export default function SchedulePage() {
         const participantsQuery = query(participantsRef, orderBy('createdAt', 'asc'));
 
         const unsubscribe = onSnapshot(participantsQuery, (snapshot) => {
-            // 現在のユーザーの旧匿名UIDがあれば、同一人物としてマージ
-            let mergedAnonUid: string | null = null;
-            try { mergedAnonUid = localStorage.getItem('ps_mergedAnonUid'); } catch {}
-
+            // UID（userId or docId）ごとに単純に最新状態を反映（マージは行わない）
             const byUid = new Map<string, { id: string; name: string; slots: string[] }>();
             snapshot.docs.forEach((d) => {
                 const data = d.data() as any;
                 const uid = (data.userId as string) || d.id;
-
-                // 表示上のキー決定：自分の旧匿名UIDは現在のUIDに統合
-                let key = uid;
-                if (user && mergedAnonUid && uid === mergedAnonUid) {
-                    key = user.uid;
-                }
-
-                const existing = byUid.get(key);
-                const incomingSlots: string[] = Array.isArray(data?.slots) ? data.slots : [];
-                if (existing) {
-                    // スロットはユニオン。名前は既存優先
-                    const mergedSlots = Array.from(new Set([...(existing.slots || []), ...incomingSlots]));
-                    byUid.set(key, {
-                        id: key,
-                        name: existing.name || data.name,
-                        slots: mergedSlots,
-                    });
-                } else {
-                    byUid.set(key, {
-                        id: key,
-                        name: data.name,
-                        slots: incomingSlots,
-                    });
-                }
+                byUid.set(uid, {
+                    id: uid,
+                    name: data.name,
+                    slots: Array.isArray(data?.slots) ? data.slots : [],
+                });
             });
             setParticipants(Array.from(byUid.values()));
         }, (err) => {

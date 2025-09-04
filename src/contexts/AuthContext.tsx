@@ -41,10 +41,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       if (currentUser) {
         setUser(currentUser);
         setLoading(false);
-        // 匿名ユーザーなら旧UIDとして保存（マイグレーション用）
-        if (typeof window !== 'undefined' && currentUser.isAnonymous) {
-          try { localStorage.setItem('ps_lastAnonUid', currentUser.uid); } catch {}
-        }
         return;
       }
 

@@ -142,14 +142,24 @@ export const LoginModal: React.FC<LoginModalProps> = ({
         )}
 
         <div className="space-y-3">
-          {/* 既定はリダイレクト方式（COOP環境で安定） */}
+          {/* 既定はポップアップ方式（以前の仕様） */}
+          <button
+            onClick={handleGoogleLogin}
+            disabled={submitting}
+            className="w-full flex items-center justify-center px-4 py-2 border border-gray-300 rounded-md shadow-sm bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
+            title="ポップアップが許可されている場合はこちら"
+          >
+            {submitting ? 'ログイン中...' : 'Googleでログイン'}
+          </button>
+
+          {/* ポップアップが使えない環境用のリダイレクト方式 */}
           <button
             onClick={handleGoogleRedirect}
             disabled={submitting}
             className="w-full flex items-center justify-center px-4 py-2 border border-gray-300 rounded-md shadow-sm bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
-            title="もっとも安定したログイン方式です"
+            title="ポップアップがブロックされる場合はこちら"
           >
-            {submitting ? 'リダイレクト中...' : 'Googleでログイン'}
+            {submitting ? 'リダイレクト中...' : 'リダイレクトでGoogleログイン'}
           </button>
 
           <button

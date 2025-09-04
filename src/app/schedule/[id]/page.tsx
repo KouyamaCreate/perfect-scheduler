@@ -9,6 +9,7 @@ import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/AuthContext';
 import { LoginModal } from '@/components/LoginModal';
 import { getUserDisplayName } from '@/lib/auth';
+import { AppHeader } from '@/components/AppHeader';
 
 export default function SchedulePage() {
     const params = useParams();
@@ -527,22 +528,7 @@ export default function SchedulePage() {
     return (
         <div className="flex flex-col min-h-screen">
             {/* ヘッダー */}
-            <header className="border-b border-[var(--border)]">
-                <div className="container flex justify-between items-center py-4">
-                    <Link href="/" className="flex items-center gap-2">
-                        <Image
-                            src="/calendar-icon.svg"
-                            alt="Perfect Scheduler Logo"
-                            width={32}
-                            height={32}
-                            className="hidden sm:block"
-                        />
-                        <h1 className="text-xl font-bold bg-gradient-to-r from-[var(--primary)] to-[var(--accent)] text-transparent bg-clip-text">
-                            Perfect Scheduler
-                        </h1>
-                    </Link>
-                </div>
-            </header>
+            <AppHeader />
 
             <main className="flex-1 container py-8">
                 <div className="mb-8">

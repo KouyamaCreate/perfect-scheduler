@@ -14,6 +14,7 @@ import {
   query,
   where,
 } from 'firebase/firestore';
+import { AppHeader } from '@/components/AppHeader';
 
 type Schedule = {
   id: string;
@@ -133,23 +134,31 @@ export default function MyPage() {
 
   if (loading || busy) {
     return (
-      <main className="container py-8">
-        <p>読み込み中...</p>
-      </main>
+      <div className="flex flex-col min-h-screen">
+        <AppHeader />
+        <main className="container py-8">
+          <p>読み込み中...</p>
+        </main>
+      </div>
     );
   }
 
   if (!user) {
     return (
-      <main className="container py-8">
-        <p>認証が必要です。</p>
-        <p className="text-sm opacity-70 mt-2">匿名ユーザーでも利用可能ですが、ブラウザのストレージを消去するとデータは紐付かなくなります。</p>
-      </main>
+      <div className="flex flex-col min-h-screen">
+        <AppHeader />
+        <main className="container py-8">
+          <p>認証が必要です。</p>
+          <p className="text-sm opacity-70 mt-2">匿名ユーザーでも利用可能ですが、ブラウザのストレージを消去するとデータは紐付かなくなります。</p>
+        </main>
+      </div>
     );
   }
 
   return (
-    <main className="container py-8 space-y-10">
+    <div className="flex flex-col min-h-screen">
+      <AppHeader />
+      <main className="container py-8 space-y-10">
       <section>
         <h1 className="text-2xl font-bold mb-4">マイページ</h1>
         {error && (
@@ -216,6 +225,7 @@ export default function MyPage() {
           </ul>
         ))}
       </section>
-    </main>
+      </main>
+    </div>
   );
 }

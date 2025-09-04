@@ -1,40 +1,12 @@
 import Image from "next/image";
 import Link from "next/link";
+import { AppHeader } from "@/components/AppHeader";
 
 export default function Home() {
   return (
     <div className="flex flex-col min-h-screen" suppressHydrationWarning>
       {/* ヘッダー */}
-      <header className="border-b border-[var(--border)]">
-        <div className="container flex justify-between items-center py-4">
-          <div className="flex items-center gap-2">
-            <Image
-              src="/calendar-icon.svg"
-              alt="Perfect Scheduler Logo"
-              width={32}
-              height={32}
-              className="hidden sm:block"
-            />
-            <h1 className="text-xl font-bold bg-gradient-to-r from-[var(--primary)] to-[var(--accent)] text-transparent bg-clip-text">
-              Perfect Scheduler
-            </h1>
-          </div>
-          <nav className="flex items-center gap-4">
-            <Link
-              href="/about"
-              className="text-[var(--foreground)] hover:text-[var(--primary)] transition"
-            >
-              使い方
-            </Link>
-            <Link prefetch={false} href="/login" className="btn btn-secondary">
-              ログイン
-            </Link>
-            <Link href="/create" className="btn btn-primary">
-              新規作成
-            </Link>
-          </nav>
-        </div>
-      </header>
+      <AppHeader />
 
       {/* メインコンテンツ */}
       <main className="flex-1">

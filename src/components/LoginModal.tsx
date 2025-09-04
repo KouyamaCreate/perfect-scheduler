@@ -16,7 +16,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   title = "ログインしてスケジュールに参加",
   description = "スケジュールに参加するにはログインが必要です。" 
 }) => {
-  const { signInAnonymously, signInWithGoogle, signInWithGoogleRedirect, loading } = useAuth();
+  const { signInAnonymously, signInWithGoogle, loading } = useAuth();
   const [error, setError] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -111,21 +111,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     }
   };
 
-  const handleGoogleRedirect = async () => {
-    if (submitting) return;
-    setError(null);
-    try {
-      setSubmitting(true);
-      await signInWithGoogleRedirect();
-      // ここでブラウザ遷移がかかる（戻ってきたらAuthContext側で完了処理）
-    } catch (e) {
-      console.error('❌ Googleリダイレクトログインエラー:', e);
-      setError('リダイレクト方式のログインに失敗しました。');
-    }
-    finally {
-      setSubmitting(false);
-    }
-  };
+  // リダイレクト方式は現在提供しない（ポップアップ方式のみ）
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
@@ -150,16 +136,6 @@ export const LoginModal: React.FC<LoginModalProps> = ({
             title="ポップアップが許可されている場合はこちら"
           >
             {submitting ? 'ログイン中...' : 'Googleでログイン'}
-          </button>
-
-          {/* ポップアップが使えない環境用のリダイレクト方式 */}
-          <button
-            onClick={handleGoogleRedirect}
-            disabled={submitting}
-            className="w-full flex items-center justify-center px-4 py-2 border border-gray-300 rounded-md shadow-sm bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
-            title="ポップアップがブロックされる場合はこちら"
-          >
-            {submitting ? 'リダイレクト中...' : 'リダイレクトでGoogleログイン'}
           </button>
 
           <button

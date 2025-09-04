@@ -2,14 +2,13 @@
 
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User } from 'firebase/auth';
-import { onAuthStateChange, signInAsAnonymous, signInWithGoogle, logout, signInWithGoogleRedirect, completeGoogleRedirectIfPresent } from '@/lib/auth';
+import { onAuthStateChange, signInAsAnonymous, signInWithGoogle, logout, completeGoogleRedirectIfPresent } from '@/lib/auth';
 
 interface AuthContextType {
   user: User | null;
   loading: boolean;
   signInAnonymously: () => Promise<void>;
   signInWithGoogle: () => Promise<void>;
-  signInWithGoogleRedirect: () => Promise<void>;
   logout: () => Promise<void>;
   isAnonymous: boolean;
 }
@@ -108,7 +107,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     loading,
     signInAnonymously: handleSignInAnonymously,
     signInWithGoogle: handleSignInWithGoogle,
-    signInWithGoogleRedirect: () => signInWithGoogleRedirect(),
     logout: handleLogout,
     isAnonymous: user?.isAnonymous ?? false,
   };

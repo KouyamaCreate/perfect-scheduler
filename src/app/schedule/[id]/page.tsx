@@ -6,10 +6,14 @@ import Image from 'next/image';
 import { useParams } from 'next/navigation';
 import { doc, getDoc, collection, addDoc, onSnapshot, query, orderBy } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import { useAuth } from '@/contexts/AuthContext';
+import { LoginModal } from '@/components/LoginModal';
+import { getUserDisplayName } from '@/lib/auth';
 
 export default function SchedulePage() {
     const params = useParams();
     const scheduleId = params.id as string;
+    const { user, loading: authLoading, signInAnonymously } = useAuth();
 
     // 状態管理
     const [loading, setLoading] = useState(true);
@@ -29,6 +33,7 @@ export default function SchedulePage() {
     const [participants, setParticipants] = useState<{ name: string, slots: string[] }[]>([]);
     const [shareLink, setShareLink] = useState('');
     const [copied, setCopied] = useState(false);
+    const [showLoginModal, setShowLoginModal] = useState(false);
 
     // カラーカスタマイズ用の状態
     const [minColor, setMinColor] = useState('#eab308'); // 少ない時の色（黄色）
@@ -37,8 +42,10 @@ export default function SchedulePage() {
     // 選択モード（デフォルトはWhen2Meetと同じく範囲選択）
     const [selectionType, setSelectionType] = useState<'path' | 'area'>('area');
     
-    // スマホ用選択モード切り替え
-    const [isMobileSelectionMode, setIsMobileSelectionMode] = useState(false);
+    // 長押し関連のstate
+    const [longPressTimer, setLongPressTimer] = useState<NodeJS.Timeout | null>(null);
+    const [isLongPressing, setIsLongPressing] = useState(false);
+    const [longPressStarted, setLongPressStarted] = useState(false);
 
     // 選択操作のための状態変数
     const [isSelecting, setIsSelecting] = useState(false);
@@ -46,6 +53,22 @@ export default function SchedulePage() {
     const [selectionCurrentPoint, setSelectionCurrentPoint] = useState<{ dateIndex: number, timeIndex: number } | null>(null);
     const [isAdding, setIsAdding] = useState(true);
     const [dragStarted, setDragStarted] = useState(false);
+
+    // 認証状態の管理とユーザー名の自動設定
+    useEffect(() => {
+        if (!authLoading && !user) {
+            // 未認証の場合は自動的に匿名ログインを実行
+            signInAnonymously().catch(console.error);
+        }
+    }, [authLoading, user, signInAnonymously]);
+
+    // ユーザー名の自動設定（別のuseEffectで分離してHydration問題を回避）
+    useEffect(() => {
+        if (user && !username) {
+            // 認証済みユーザーの場合、自動的にユーザー名を設定
+            setUsername(getUserDisplayName(user));
+        }
+    }, [user, username]);
 
     // スケジュールデータの取得
     useEffect(() => {
@@ -108,18 +131,29 @@ export default function SchedulePage() {
     // 参加者を追加する
     const handleAddParticipant = async (e: React.FormEvent) => {
         e.preventDefault();
+        
+        // 認証チェック
+        if (!user) {
+            setShowLoginModal(true);
+            return;
+        }
+
         if (!username || selectedSlots.length === 0) return;
 
         try {
             const participantData = {
                 name: username,
                 slots: [...selectedSlots],
-                createdAt: new Date()
+                createdAt: new Date(),
+                userId: user.uid // ユーザーIDを追加
             };
 
             await addDoc(collection(db, 'schedules', scheduleId, 'participants'), participantData);
 
-            setUsername('');
+            // 匿名ユーザーの場合はフォームをクリアしない（再利用のため）
+            if (!user.isAnonymous) {
+                setUsername('');
+            }
             setSelectedSlots([]);
         } catch (err) {
             console.error('Error adding participant:', err);
@@ -171,45 +205,77 @@ export default function SchedulePage() {
 
     // タッチ開始時
     const handleCellTouchStart = (dateIndex: number, timeIndex: number, e: React.TouchEvent) => {
-        // スマホで選択モードがOFFの場合はスクロールを優先
-        if (window.innerWidth <= 768 && !isMobileSelectionMode) {
-            return;
-        }
-        
         // シングルタッチのみ処理
         if (e.touches.length !== 1) return;
         
-        e.preventDefault();
+        // PCでは従来通りの処理
+        if (window.innerWidth > 768) {
+            e.preventDefault();
+            const slotId = `${dateIndex}-${timeIndex}`;
+            const isSelected = selectedSlots.includes(slotId);
 
-        const slotId = `${dateIndex}-${timeIndex}`;
-        const isSelected = selectedSlots.includes(slotId);
+            setIsAdding(!isSelected);
+            setSelectionStartPoint({ dateIndex, timeIndex });
+            setSelectionCurrentPoint({ dateIndex, timeIndex });
+            setIsSelecting(true);
+            setDragStarted(false);
 
-        setIsAdding(!isSelected);
-        setSelectionStartPoint({ dateIndex, timeIndex });
-        setSelectionCurrentPoint({ dateIndex, timeIndex });
-        setIsSelecting(true);
-        setDragStarted(false);
+            if (selectionType === 'path') {
+                toggleCellSelection(dateIndex, timeIndex);
+            }
 
-        if (selectionType === 'path') {
-            toggleCellSelection(dateIndex, timeIndex);
+            setTouchActiveCell({ dateIndex, timeIndex });
+            return;
         }
+        
+        // スマホでは長押しタイマーを開始
+        const timer = setTimeout(() => {
+            // 長押し検出時の処理
+            e.preventDefault();
+            setIsLongPressing(true);
+            setLongPressStarted(true);
+            
+            const slotId = `${dateIndex}-${timeIndex}`;
+            const isSelected = selectedSlots.includes(slotId);
 
-        setTouchActiveCell({ dateIndex, timeIndex });
+            setIsAdding(!isSelected);
+            setSelectionStartPoint({ dateIndex, timeIndex });
+            setSelectionCurrentPoint({ dateIndex, timeIndex });
+            setIsSelecting(true);
+            setDragStarted(false);
+
+            if (selectionType === 'path') {
+                toggleCellSelection(dateIndex, timeIndex);
+            }
+
+            setTouchActiveCell({ dateIndex, timeIndex });
+            
+            // バイブレーションでフィードバック
+            if (navigator.vibrate) {
+                navigator.vibrate(50);
+            }
+        }, 300); // 300msで長押しと判定
+        
+        setLongPressTimer(timer);
     };
 
     // タッチ移動時
     const handleCellTouchMove = (e: React.TouchEvent) => {
-        // スマホで選択モードがOFFの場合はスクロールを優先
-        if (window.innerWidth <= 768 && !isMobileSelectionMode) {
+        // スマホで長押しタイマーをキャンセル（移動したら長押しではない）
+        if (window.innerWidth <= 768 && longPressTimer && !longPressStarted) {
+            clearTimeout(longPressTimer);
+            setLongPressTimer(null);
+        }
+        
+        // PCか長押し開始後のみ選択処理
+        if (window.innerWidth <= 768 && !isLongPressing) {
             return;
         }
         
         if (!isSelecting || e.touches.length !== 1) return;
         
-        // 選択中のみプリベント
-        if (dragStarted) {
-            e.preventDefault();
-        }
+        // 選択中はスクロールを禁止
+        e.preventDefault();
         
         const touch = e.touches[0];
         if (!touch) return;
@@ -233,8 +299,14 @@ export default function SchedulePage() {
 
     // タッチ終了時
     const handleCellTouchEnd = (e: React.TouchEvent) => {
-        // スマホで選択モードがOFFの場合はスクロールを優先
-        if (window.innerWidth <= 768 && !isMobileSelectionMode) {
+        // 長押しタイマーをクリア
+        if (longPressTimer) {
+            clearTimeout(longPressTimer);
+            setLongPressTimer(null);
+        }
+        
+        // スマホで長押しが開始されていない場合はスクロールを優先
+        if (window.innerWidth <= 768 && !isLongPressing) {
             return;
         }
         
@@ -248,10 +320,13 @@ export default function SchedulePage() {
             }
         }
         
+        // 状態をリセット
         setIsSelecting(false);
         setSelectionStartPoint(null);
         setSelectionCurrentPoint(null);
         setTouchActiveCell(null);
+        setIsLongPressing(false);
+        setLongPressStarted(false);
     };
 
     // グローバルなマウス移動の検知（セル外でのドラッグにも対応）
@@ -366,9 +441,7 @@ export default function SchedulePage() {
 
     // コンポーネントがマウントされた時にシェアリンクを設定
     useEffect(() => {
-        if (typeof window !== 'undefined') {
-            setShareLink(window.location.href);
-        }
+        setShareLink(window.location.href);
     }, []);
 
     if (loading) {
@@ -427,21 +500,6 @@ export default function SchedulePage() {
                         <div className="flex flex-col gap-4 mb-4">
                             <div className="flex justify-between items-center">
                                 <h2 className="text-xl font-semibold">スケジュールを選択</h2>
-                                
-                                {/* スマホ用選択モード切り替え */}
-                                <div className="md:hidden flex items-center gap-2">
-                                    <span className="text-sm">選択モード:</span>
-                                    <button
-                                        onClick={() => setIsMobileSelectionMode(!isMobileSelectionMode)}
-                                        className={`px-3 py-1 rounded text-sm font-medium transition-colors ${
-                                            isMobileSelectionMode 
-                                                ? 'bg-[var(--primary)] text-white' 
-                                                : 'bg-[var(--secondary)] text-[var(--foreground)]'
-                                        }`}
-                                    >
-                                        {isMobileSelectionMode ? '選択中' : 'スクロール'}
-                                    </button>
-                                </div>
                             </div>
                             
                             {/* PC用選択モード切り替え */}
@@ -474,10 +532,7 @@ export default function SchedulePage() {
                             
                             {/* スマホ用アドバイス */}
                             <div className="md:hidden text-sm opacity-80">
-                                {isMobileSelectionMode 
-                                    ? '⚡ 予定選択モード: タップ・ドラッグで選択できます'
-                                    : '📱 スクロールモード: 上のボタンで選択モードに切り替えできます'
-                                }
+                                📱 スマホ: 長押しで予定選択、通常タップでスクロール
                             </div>
                         </div>
 
@@ -857,6 +912,13 @@ export default function SchedulePage() {
                     }
                 }
             `}</style>
+            
+            <LoginModal 
+                isOpen={showLoginModal} 
+                onClose={() => setShowLoginModal(false)}
+                title="スケジュールに参加"
+                description="スケジュールに参加するにはログインが必要です。"
+            />
         </div>
     );
 }

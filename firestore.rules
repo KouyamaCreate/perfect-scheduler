@@ -1,0 +1,27 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // スケジュールの読み取りは認証済みユーザーのみ
+    match /schedules/{scheduleId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null;
+      allow update: if request.auth != null;
+      allow delete: if request.auth != null;
+      
+      // 参加者の読み取り/書き込みは認証済みユーザーのみ
+      match /participants/{participantId} {
+        allow read: if request.auth != null;
+        allow create: if request.auth != null;
+        allow update: if request.auth != null 
+                      && (request.auth.uid == resource.data.userId || request.auth.uid == request.data.userId);
+        allow delete: if request.auth != null 
+                      && request.auth.uid == resource.data.userId;
+      }
+    }
+    
+    // その他のドキュメントは認証済みユーザーのみアクセス可能
+    match /{document=**} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}

@@ -1,13 +1,18 @@
 'use client';
 
 import React, { useState, useEffect, Suspense } from 'react';
-import Link from 'next/link';
-import Image from 'next/image';
+// import Link from 'next/link';
+// import Image from 'next/image';
 import { useSearchParams } from 'next/navigation';
+import { useAuth } from '@/contexts/AuthContext';
+import { LoginModal } from '@/components/LoginModal';
+import { getUserDisplayName } from '@/lib/auth';
+import { AppHeader } from '@/components/AppHeader';
 
 // URLパラメータを取得するコンポーネント
 function ScheduleDemoContent() {
     const searchParams = useSearchParams();
+    const { user, loading: authLoading, signInAnonymously } = useAuth();
 
     // URLからパラメータを取得
     const eventName = searchParams.get('name') || 'サンプルイベント';
@@ -21,19 +26,24 @@ function ScheduleDemoContent() {
     // 状態管理
     const [username, setUsername] = useState('');
     const [selectedSlots, setSelectedSlots] = useState<string[]>([]);
-    const [participants, setParticipants] = useState<{ name: string, slots: string[] }[]>([]);
+    const [participants, setParticipants] = useState<{ id: string; name: string; slots: string[] }[]>([]);
+    const [highlightedParticipantId, setHighlightedParticipantId] = useState<string | null>(null);
+    const [slotsInitialized, setSlotsInitialized] = useState(false);
     const [shareLink, setShareLink] = useState('');
     const [copied, setCopied] = useState(false);
+    const [showLoginModal, setShowLoginModal] = useState(false);
 
     // カラーカスタマイズ用の状態
-    const [minColor, setMinColor] = useState('#eab308'); // 少ない時の色（黄色）
-    const [maxColor, setMaxColor] = useState('#22c55e'); // 多い時の色（緑色）
+    const [minColor, setMinColor] = useState('#dce8ff'); // 少ない時の色（淡い青）
+    const [maxColor, setMaxColor] = useState('#73a5ff'); // 多い時の色（濃い青）
 
     // 選択モード（デフォルトはWhen2Meetと同じく範囲選択）
     const [selectionType, setSelectionType] = useState<'path' | 'area'>('area');
     
-    // スマホ用選択モード切り替え
-    const [isMobileSelectionMode, setIsMobileSelectionMode] = useState(false);
+    // 長押し関連のstate
+    const [longPressTimer, setLongPressTimer] = useState<NodeJS.Timeout | null>(null);
+    const [isLongPressing, setIsLongPressing] = useState(false);
+    const [longPressStarted, setLongPressStarted] = useState(false);
 
     // 選択操作のための状態変数
     const [isSelecting, setIsSelecting] = useState(false);
@@ -45,19 +55,68 @@ function ScheduleDemoContent() {
     // 日付と時間スロットの配列を生成
     const dates = getDatesInRange(startDate, endDate);
     const timeSlots = getTimeSlots(startTime, endTime, duration);
+    const highlightedParticipant = highlightedParticipantId
+        ? participants.find((participant) => participant.id === highlightedParticipantId) ?? null
+        : null;
+
+    useEffect(() => {
+        if (highlightedParticipantId && !participants.some((participant) => participant.id === highlightedParticipantId)) {
+            setHighlightedParticipantId(null);
+        }
+    }, [participants, highlightedParticipantId]);
+
+    // 認証状態の管理とユーザー名の自動設定
+    useEffect(() => {
+        if (!authLoading && !user) {
+            // 未認証の場合は自動的に匿名ログインを実行
+            signInAnonymously().catch(console.error);
+        }
+    }, [authLoading, user, signInAnonymously]);
+
+    // ユーザー名の自動設定（同一ユーザーは保存済み氏名で固定）とスロット引き継ぎ
+    useEffect(() => {
+        if (!user) return;
+        const me = participants.find(p => p.id === user.uid);
+        if (me) {
+            if (me.name && username !== me.name) {
+                setUsername(me.name);
+            }
+            if (!slotsInitialized && selectedSlots.length === 0 && me.slots && me.slots.length > 0) {
+                setSelectedSlots(me.slots);
+                setSlotsInitialized(true);
+            }
+            return;
+        }
+        if (!username) {
+            setUsername(getUserDisplayName(user));
+        }
+    }, [user, username, participants, slotsInitialized, selectedSlots.length]);
 
     // 参加者を追加する
     const handleAddParticipant = (e: React.FormEvent) => {
         e.preventDefault();
+        
+        // 認証チェック
+        if (!user) {
+            setShowLoginModal(true);
+            return;
+        }
+
         if (!username || selectedSlots.length === 0) return;
 
-        setParticipants([...participants, {
-            name: username,
-            slots: [...selectedSlots]
-        }]);
+        // 同一ユーザー（UID）で一意化。既存があれば氏名は保持し、スロットを更新
+        setParticipants(prev => {
+            const idx = prev.findIndex(p => p.id === user.uid);
+            if (idx >= 0) {
+                const fixedName = prev[idx].name;
+                const updated = [...prev];
+                updated[idx] = { id: user.uid, name: fixedName, slots: [...selectedSlots] };
+                return updated;
+            }
+            return [...prev, { id: user.uid, name: username, slots: [...selectedSlots] }];
+        });
 
-        setUsername('');
-        setSelectedSlots([]);
+        // デモではクリアせず、直前の回答を保持
     };
 
     // セルをクリックした時の処理（選択開始）
@@ -104,45 +163,77 @@ function ScheduleDemoContent() {
 
     // タッチ開始時
     const handleCellTouchStart = (dateIndex: number, timeIndex: number, e: React.TouchEvent) => {
-        // スマホで選択モードがOFFの場合はスクロールを優先
-        if (window.innerWidth <= 768 && !isMobileSelectionMode) {
-            return;
-        }
-        
         // シングルタッチのみ処理
         if (e.touches.length !== 1) return;
         
-        e.preventDefault();
+        // PCでは従来通りの処理
+        if (window.innerWidth > 768) {
+            e.preventDefault();
+            const slotId = `${dateIndex}-${timeIndex}`;
+            const isSelected = selectedSlots.includes(slotId);
 
-        const slotId = `${dateIndex}-${timeIndex}`;
-        const isSelected = selectedSlots.includes(slotId);
+            setIsAdding(!isSelected);
+            setSelectionStartPoint({ dateIndex, timeIndex });
+            setSelectionCurrentPoint({ dateIndex, timeIndex });
+            setIsSelecting(true);
+            setDragStarted(false);
 
-        setIsAdding(!isSelected);
-        setSelectionStartPoint({ dateIndex, timeIndex });
-        setSelectionCurrentPoint({ dateIndex, timeIndex });
-        setIsSelecting(true);
-        setDragStarted(false);
+            if (selectionType === 'path') {
+                toggleCellSelection(dateIndex, timeIndex);
+            }
 
-        if (selectionType === 'path') {
-            toggleCellSelection(dateIndex, timeIndex);
+            setTouchActiveCell({ dateIndex, timeIndex });
+            return;
         }
+        
+        // スマホでは長押しタイマーを開始
+        const timer = setTimeout(() => {
+            // 長押し検出時の処理
+            e.preventDefault();
+            setIsLongPressing(true);
+            setLongPressStarted(true);
+            
+            const slotId = `${dateIndex}-${timeIndex}`;
+            const isSelected = selectedSlots.includes(slotId);
 
-        setTouchActiveCell({ dateIndex, timeIndex });
+            setIsAdding(!isSelected);
+            setSelectionStartPoint({ dateIndex, timeIndex });
+            setSelectionCurrentPoint({ dateIndex, timeIndex });
+            setIsSelecting(true);
+            setDragStarted(false);
+
+            if (selectionType === 'path') {
+                toggleCellSelection(dateIndex, timeIndex);
+            }
+
+            setTouchActiveCell({ dateIndex, timeIndex });
+            
+            // バイブレーションでフィードバック
+            if (navigator.vibrate) {
+                navigator.vibrate(50);
+            }
+        }, 300); // 300msで長押しと判定
+        
+        setLongPressTimer(timer);
     };
 
     // タッチ移動時
     const handleCellTouchMove = (e: React.TouchEvent) => {
-        // スマホで選択モードがOFFの場合はスクロールを優先
-        if (window.innerWidth <= 768 && !isMobileSelectionMode) {
+        // スマホで長押しタイマーをキャンセル（移動したら長押しではない）
+        if (window.innerWidth <= 768 && longPressTimer && !longPressStarted) {
+            clearTimeout(longPressTimer);
+            setLongPressTimer(null);
+        }
+        
+        // PCか長押し開始後のみ選択処理
+        if (window.innerWidth <= 768 && !isLongPressing) {
             return;
         }
         
         if (!isSelecting || e.touches.length !== 1) return;
         
-        // 選択中のみプリベント
-        if (dragStarted) {
-            e.preventDefault();
-        }
+        // 選択中はスクロールを禁止
+        e.preventDefault();
         
         const touch = e.touches[0];
         if (!touch) return;
@@ -166,8 +257,14 @@ function ScheduleDemoContent() {
 
     // タッチ終了時
     const handleCellTouchEnd = (e: React.TouchEvent) => {
-        // スマホで選択モードがOFFの場合はスクロールを優先
-        if (window.innerWidth <= 768 && !isMobileSelectionMode) {
+        // 長押しタイマーをクリア
+        if (longPressTimer) {
+            clearTimeout(longPressTimer);
+            setLongPressTimer(null);
+        }
+        
+        // スマホで長押しが開始されていない場合はスクロールを優先
+        if (window.innerWidth <= 768 && !isLongPressing) {
             return;
         }
         
@@ -181,10 +278,13 @@ function ScheduleDemoContent() {
             }
         }
         
+        // 状態をリセット
         setIsSelecting(false);
         setSelectionStartPoint(null);
         setSelectionCurrentPoint(null);
         setTouchActiveCell(null);
+        setIsLongPressing(false);
+        setLongPressStarted(false);
     };
 
     // グローバルなマウス移動の検知（セル外でのドラッグにも対応）
@@ -304,61 +404,48 @@ function ScheduleDemoContent() {
 
     return (
         <div className="flex flex-col min-h-screen">
-            {/* ヘッダー */}
-            <header className="border-b border-[var(--border)]">
-                <div className="container flex justify-between items-center py-4">
-                    <Link href="/" className="flex items-center gap-2">
-                        <Image
-                            src="/calendar-icon.svg"
-                            alt="Perfect Scheduler Logo"
-                            width={32}
-                            height={32}
-                            className="hidden sm:block"
-                        />
-                        <h1 className="text-xl font-bold bg-gradient-to-r from-[var(--primary)] to-[var(--accent)] text-transparent bg-clip-text">
-                            Perfect Scheduler
-                        </h1>
-                    </Link>
-                </div>
-            </header>
+            <AppHeader />
 
-            <main className="flex-1 container py-8">
-                <div className="mb-8">
-                    <h1 className="text-3xl font-bold mb-2">{eventName}</h1>
-                    {description && <p className="opacity-80">{description}</p>}
-                </div>
-
-                <div className="mb-3 px-4 py-3 bg-[var(--secondary)] rounded-lg">
-                    <p className="font-medium">💡 アドバイス</p>
-                    <p className="text-sm opacity-80">時間枠をクリックして選択、またはドラッグして複数の時間をまとめて選択できます。</p>
+            <main className="flex-1 container py-10">
+                <div className="surface-card mb-6 p-6 md:p-8">
+                    <div className="flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
+                        <div>
+                            <p className="eyebrow mb-3">Meetrace Demo</p>
+                            <h1 className="mb-2 text-[2rem] font-bold text-[var(--foreground)]">{eventName}</h1>
+                            {description && <p className="max-w-3xl text-base leading-7 text-[var(--foreground-muted)]">{description}</p>}
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                            {dates.length > 0 && (
+                                <span className="status-pill">
+                                    {formatDate(dates[0])} - {formatDate(dates[dates.length - 1])}
+                                </span>
+                            )}
+                            <span className="status-pill">{startTime} - {endTime}</span>
+                            <span className="status-pill">{participants.length}人が回答中</span>
+                            {highlightedParticipant && (
+                                <span className="status-pill border-[#aac8ff] bg-[var(--primary-soft)] text-[var(--primary)]">
+                                    {highlightedParticipant.name}を強調表示中
+                                </span>
+                            )}
+                        </div>
+                    </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-                    {/* スケジュール表示部分 */}
+                <div className="soft-panel mb-6 px-4 py-4 md:px-5">
+                    <p className="mb-1 text-sm font-bold text-[var(--primary-strong)]">ドラッグ操作のヒント</p>
+                    <p className="text-sm leading-6 text-[var(--foreground-muted)]">時間枠をクリックして選択、またはドラッグして複数の時間をまとめて選択できます。</p>
+                </div>
+
+                <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
                     <div className="md:col-span-2">
-                        <div className="flex flex-col gap-4 mb-4">
+                        <div className="mb-4 flex flex-col gap-4">
                             <div className="flex justify-between items-center">
-                                <h2 className="text-xl font-semibold">スケジュールを選択</h2>
-                                
-                                {/* スマホ用選択モード切り替え */}
-                                <div className="md:hidden flex items-center gap-2">
-                                    <span className="text-sm">選択モード:</span>
-                                    <button
-                                        onClick={() => setIsMobileSelectionMode(!isMobileSelectionMode)}
-                                        className={`px-3 py-1 rounded text-sm font-medium transition-colors ${
-                                            isMobileSelectionMode 
-                                                ? 'bg-[var(--primary)] text-white' 
-                                                : 'bg-[var(--secondary)] text-[var(--foreground)]'
-                                        }`}
-                                    >
-                                        {isMobileSelectionMode ? '選択中' : 'スクロール'}
-                                    </button>
-                                </div>
+                                <h2 className="text-xl font-bold text-[var(--foreground)]">候補時間を選択</h2>
                             </div>
                             
-                            {/* PC用選択モード切り替え */}
-                            <div className="hidden md:flex items-center gap-4">
-                                <div className="flex items-center gap-1">
+                            <div className="hidden md:flex items-center gap-3">
+                                <div className="rounded-full border border-[#aac8ff] bg-[var(--primary-soft)] px-3 py-2">
+                                <div className="flex items-center gap-2">
                                     <input
                                         type="radio"
                                         id="areaMode"
@@ -368,9 +455,11 @@ function ScheduleDemoContent() {
                                         onChange={() => setSelectionType('area')}
                                         className="accent-[var(--primary)]"
                                     />
-                                    <label htmlFor="areaMode" className="text-sm">範囲選択</label>
+                                    <label htmlFor="areaMode" className="text-sm font-medium text-[var(--foreground)]">範囲選択</label>
                                 </div>
-                                <div className="flex items-center gap-1">
+                                </div>
+                                <div className="rounded-full border border-[var(--border)] bg-white px-3 py-2">
+                                <div className="flex items-center gap-2">
                                     <input
                                         type="radio"
                                         id="pathMode"
@@ -380,20 +469,18 @@ function ScheduleDemoContent() {
                                         onChange={() => setSelectionType('path')}
                                         className="accent-[var(--primary)]"
                                     />
-                                    <label htmlFor="pathMode" className="text-sm">なぞり選択</label>
+                                    <label htmlFor="pathMode" className="text-sm font-medium text-[var(--foreground)]">なぞり選択</label>
+                                </div>
                                 </div>
                             </div>
                             
-                            {/* スマホ用アドバイス */}
-                            <div className="md:hidden text-sm opacity-80">
-                                {isMobileSelectionMode 
-                                    ? '⚡ 予定選択モード: タップ・ドラッグで選択できます'
-                                    : '📱 スクロールモード: 上のボタンで選択モードに切り替えできます'
-                                }
+                            <div className="md:hidden rounded-xl bg-[var(--secondary)] px-4 py-3 text-sm text-[var(--foreground-muted)]">
+                                📱 スマホ: 長押しで予定選択、通常タップでスクロール
                             </div>
                         </div>
 
-                        <div className="calendar-container mb-4">
+                        <div className="surface-card mb-4 p-3 md:p-4">
+                        <div className="calendar-container">
                             <div
                                 className="calendar-grid"
                                 style={{
@@ -415,7 +502,9 @@ function ScheduleDemoContent() {
                                         <div className="text-xs font-medium">{time}</div>
                                     </div>
                                     {dates.map((_, dateIndex) => {
+                                        const slotId = `${dateIndex}-${timeIndex}`;
                                         const { isSelected, isInActiveSelection, availability } = getCellStatus(dateIndex, timeIndex);
+                                        const isHighlightedParticipantSlot = highlightedParticipant?.slots.includes(slotId) ?? false;
 
                                         const cellClassName = `
                                             time-slot 
@@ -435,8 +524,8 @@ function ScheduleDemoContent() {
                                             const maxSteps = Math.min(5, participants.length);
 
                                             if (availability <= participants.length - maxSteps) {
-                                                // 下位の参加者は灰色
-                                                availabilityColor = '#9ca3af'; // グレー
+                                                // 下位の参加者は淡い青
+                                                availabilityColor = '#ebf3ff';
                                             } else {
                                                 // 上位5人（または全員）はグラデーション
                                                 // 参加者数 - availability が 0 の場合は最大色
@@ -481,9 +570,13 @@ function ScheduleDemoContent() {
                                                     WebkitTouchCallout: 'none',
                                                     WebkitUserSelect: 'none',
                                                     // 選択中のエレメントが必ず上に表示されるようにz-indexを設定
-                                                    zIndex: isSelecting && (isInActiveSelection || isSelected) ? 10 : 1,
+                                                    zIndex: isSelecting && (isInActiveSelection || isSelected) ? 10 : isHighlightedParticipantSlot ? 4 : 1,
                                                     // 参加者の割合に応じた背景色を設定
-                                                    backgroundColor: availabilityColor || undefined
+                                                    backgroundColor: availabilityColor || undefined,
+                                                    color: isSelected || (isInActiveSelection && dragStarted) ? '#ffffff' : undefined,
+                                                    boxShadow: isHighlightedParticipantSlot
+                                                        ? 'inset 0 0 0 2px rgba(34, 92, 197, 0.98), inset 0 0 0 4px rgba(255, 255, 255, 0.72)'
+                                                        : undefined
                                                 }}
                                             >
                                                 {availability > 0 && (
@@ -498,15 +591,16 @@ function ScheduleDemoContent() {
                             ))}
                             </div>
                         </div>
+                        </div>
 
-                        <div className="flex flex-wrap items-center gap-4 mb-8">
+                        <div className="surface-card mb-8 flex flex-wrap items-center gap-4 p-4">
                             <div className="flex items-center gap-2">
-                                <div className="w-4 h-4 bg-[var(--primary)]"></div>
-                                <span className="text-sm">あなたの選択</span>
+                                <div className="h-4 w-4 rounded-sm bg-[var(--primary)]"></div>
+                                <span className="text-sm text-[var(--foreground-muted)]">あなたの選択</span>
                             </div>
                             <div className="flex items-center gap-2">
-                                <div className="w-4 h-4" style={{ backgroundColor: maxColor }}></div>
-                                <span className="text-sm">最大参加可能（5人または全員）</span>
+                                <div className="h-4 w-4 rounded-sm" style={{ backgroundColor: maxColor }}></div>
+                                <span className="text-sm text-[var(--foreground-muted)]">重なりが大きい候補</span>
                                 <input
                                     type="color"
                                     value={maxColor}
@@ -516,14 +610,14 @@ function ScheduleDemoContent() {
                                 />
                             </div>
                             <div className="flex items-center gap-2">
-                                <div className="w-10 h-4 bg-gradient-to-r" style={{
+                                <div className="h-4 w-10 rounded-sm bg-gradient-to-r" style={{
                                     backgroundImage: `linear-gradient(to right, ${minColor}, ${maxColor})`
                                 }}></div>
-                                <span className="text-sm">参加可能人数（上位5人まで）</span>
+                                <span className="text-sm text-[var(--foreground-muted)]">青の濃淡で重なりを表示</span>
                             </div>
                             <div className="flex items-center gap-2">
-                                <div className="w-4 h-4" style={{ backgroundColor: minColor }}></div>
-                                <span className="text-sm">最小参加（上位5人中の最下位）</span>
+                                <div className="h-4 w-4 rounded-sm" style={{ backgroundColor: minColor }}></div>
+                                <span className="text-sm text-[var(--foreground-muted)]">重なりが小さい候補</span>
                                 <input
                                     type="color"
                                     value={minColor}
@@ -533,16 +627,24 @@ function ScheduleDemoContent() {
                                 />
                             </div>
                             <div className="flex items-center gap-2">
-                                <div className="w-4 h-4 bg-[#9ca3af]"></div>
-                                <span className="text-sm">下位の参加者（灰色）</span>
+                                <div className="h-4 w-4 rounded-sm bg-[#ebf3ff]"></div>
+                                <span className="text-sm text-[var(--foreground-muted)]">その他の候補</span>
                             </div>
+                            {highlightedParticipant && (
+                                <div className="flex items-center gap-2">
+                                    <div
+                                        className="h-4 w-4 rounded-sm bg-white"
+                                        style={{ boxShadow: 'inset 0 0 0 2px rgba(34, 92, 197, 0.98), inset 0 0 0 4px rgba(255, 255, 255, 0.72)' }}
+                                    ></div>
+                                    <span className="text-sm text-[var(--foreground-muted)]">{highlightedParticipant.name}の選択</span>
+                                </div>
+                            )}
                         </div>
                     </div>
 
-                    {/* 参加者登録部分 */}
                     <div>
-                        <div className="bg-[var(--secondary)] p-4 rounded-lg mb-6">
-                            <h2 className="text-xl font-semibold mb-4">参加情報を入力</h2>
+                        <div className="surface-card mb-6 p-5">
+                            <h2 className="mb-4 text-xl font-bold text-[var(--foreground)]">参加情報を入力</h2>
                             <form onSubmit={handleAddParticipant}>
                                 <div className="mb-4">
                                     <label htmlFor="username" className="block font-medium mb-2">
@@ -553,17 +655,22 @@ function ScheduleDemoContent() {
                                         id="username"
                                         value={username}
                                         onChange={(e) => setUsername(e.target.value)}
-                                        className="input"
+                                        disabled={Boolean(user?.uid && participants.find(p => p.id === user?.uid))}
+                                        className={`input ${Boolean(user?.uid && participants.find(p => p.id === user?.uid)) ? 'bg-[#f7f5f5] text-[var(--foreground-subtle)] cursor-not-allowed' : ''}`}
+                                        title={Boolean(user?.uid && participants.find(p => p.id === user?.uid)) ? 'このイベントでは氏名は固定されています' : undefined}
                                         placeholder="名前を入力"
                                         required
                                     />
+                                    {Boolean(user?.uid && participants.find(p => p.id === user?.uid)) && (
+                                        <p className="mt-1 text-sm text-[var(--foreground-muted)]">このイベントでは氏名は固定されています</p>
+                                    )}
                                 </div>
 
                                 <div className="mb-4">
                                     <p className="block font-medium mb-2">
                                         選択済み時間枠: {selectedSlots.length}
                                     </p>
-                                    <p className="text-sm opacity-70">
+                                    <p className="text-sm text-[var(--foreground-muted)]">
                                         上の表で参加可能な時間帯を選択してください
                                     </p>
                                 </div>
@@ -578,57 +685,83 @@ function ScheduleDemoContent() {
                             </form>
                         </div>
 
-                        <div className="bg-[var(--secondary)] p-4 rounded-lg mb-6">
-                            <h2 className="text-xl font-semibold mb-4">スケジュールを共有</h2>
+                        <div className="surface-card mb-6 p-5">
+                            <h2 className="mb-4 text-xl font-bold text-[var(--foreground)]">スケジュールを共有</h2>
                             <div className="flex flex-col mb-4">
                                 <div className="relative">
                                     <input
                                         type="text"
                                         value={shareLink}
                                         readOnly
-                                        className="input pr-12"
+                                        className="input pr-16"
                                     />
                                     <button
                                         onClick={copyShareLink}
-                                        className="absolute right-1 top-1/2 -translate-y-1/2 text-[var(--primary)] px-3"
+                                        className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md bg-[var(--primary-soft)] px-3 py-1 text-xs font-bold text-[var(--primary)]"
                                     >
                                         {copied ? '✓' : 'コピー'}
                                     </button>
                                 </div>
-                                <p className="text-sm mt-2 opacity-70">
+                                <p className="mt-2 text-sm text-[var(--foreground-muted)]">
                                     このリンクを共有して、参加者を招待しましょう
                                 </p>
                             </div>
                         </div>
 
-                        <div className="bg-[var(--secondary)] p-4 rounded-lg">
-                            <h2 className="text-xl font-semibold mb-4">参加者一覧 ({participants.length})</h2>
+                        <div className="surface-card p-5">
+                            <h2 className="mb-4 text-xl font-bold text-[var(--foreground)]">参加者一覧 ({participants.length})</h2>
                             {participants.length > 0 ? (
                                 <ul className="space-y-2">
-                                    {participants.map((participant, index) => (
-                                        <li key={index} className="flex items-center justify-between">
-                                            <div>
-                                                <span className="font-medium">{participant.name}</span>
-                                                <span className="text-sm opacity-70 ml-2">
-                                                    {participant.slots.length}枠選択
-                                                </span>
-                                            </div>
+                                    {participants.map((participant) => (
+                                        <li key={participant.id}>
+                                            <button
+                                                type="button"
+                                                onClick={() => setHighlightedParticipantId((current) => current === participant.id ? null : participant.id)}
+                                                aria-pressed={highlightedParticipantId === participant.id}
+                                                className={`w-full rounded-xl border px-3 py-3 text-left transition ${
+                                                    highlightedParticipantId === participant.id
+                                                        ? 'border-[#73a5ff] bg-[var(--primary-soft)] shadow-[0_12px_32px_rgba(69,113,191,0.14)]'
+                                                        : 'border-transparent bg-[var(--secondary)] hover:border-[#aac8ff] hover:bg-[var(--primary-soft)]'
+                                                }`}
+                                            >
+                                                <div className="flex items-start justify-between gap-3">
+                                                    <div className="min-w-0">
+                                                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                                                            <span className="font-medium text-[var(--foreground)]">{participant.name}</span>
+                                                            <span className="text-sm text-[var(--foreground-muted)]">
+                                                                {participant.slots.length}枠選択
+                                                            </span>
+                                                        </div>
+                                                        <p className="mt-1 text-xs text-[var(--foreground-muted)]">
+                                                            {highlightedParticipantId === participant.id
+                                                                ? '強調表示中。もう一度押すと解除できます。'
+                                                                : 'クリックでこの参加者の候補時間を強調表示します。'}
+                                                        </p>
+                                                    </div>
+                                                    <span className={`rounded-full px-2 py-1 text-xs font-bold ${
+                                                        highlightedParticipantId === participant.id
+                                                            ? 'bg-white text-[var(--primary)]'
+                                                            : 'bg-white text-[var(--foreground-muted)]'
+                                                    }`}>
+                                                        {highlightedParticipantId === participant.id ? '表示中' : '表示'}
+                                                    </span>
+                                                </div>
+                                            </button>
                                         </li>
                                     ))}
                                 </ul>
                             ) : (
-                                <p className="opacity-70">まだ参加者はいません</p>
+                                <p className="text-[var(--foreground-muted)]">まだ参加者はいません</p>
                             )}
                         </div>
                     </div>
                 </div>
             </main>
 
-            {/* フッター */}
             <footer className="border-t border-[var(--border)] py-6">
                 <div className="container text-center">
-                    <p className="text-sm text-[var(--foreground)] opacity-70">
-                        © 2025 Perfect Scheduler. All rights reserved.
+                    <p className="text-sm text-[var(--foreground-muted)]">
+                        © 2025 Meetrace. All rights reserved.
                     </p>
                 </div>
             </footer>
@@ -639,7 +772,8 @@ function ScheduleDemoContent() {
                     max-height: 70vh;
                     max-width: 100%;
                     border: 1px solid var(--border);
-                    border-radius: 8px;
+                    border-radius: 12px;
+                    background: #ffffff;
                     position: relative;
                 }
                 
@@ -650,17 +784,17 @@ function ScheduleDemoContent() {
                 }
                 
                 .calendar-container::-webkit-scrollbar-track {
-                    background: var(--secondary);
+                    background: #f7f9fc;
                     border-radius: 3px;
                 }
                 
                 .calendar-container::-webkit-scrollbar-thumb {
-                    background: var(--border);
+                    background: #aac8ff;
                     border-radius: 3px;
                 }
                 
                 .calendar-container::-webkit-scrollbar-thumb:hover {
-                    background: var(--primary);
+                    background: var(--primary-hover);
                 }
                 
                 /* Firefox用スクロールバー */
@@ -683,6 +817,7 @@ function ScheduleDemoContent() {
                     display: flex;
                     align-items: center;
                     justify-content: center;
+                    color: var(--foreground-muted);
                 }
                 
                 .date-header {
@@ -693,6 +828,8 @@ function ScheduleDemoContent() {
                     display: flex;
                     align-items: center;
                     justify-content: center;
+                    background: #f8fbff;
+                    color: var(--primary-strong);
                 }
                 
                 .time-label {
@@ -703,6 +840,8 @@ function ScheduleDemoContent() {
                     display: flex;
                     align-items: center;
                     justify-content: center;
+                    background: #f8fbff;
+                    color: var(--foreground-muted);
                 }
                 
                 .time-slot {
@@ -711,7 +850,7 @@ function ScheduleDemoContent() {
                     cursor: pointer;
                     transition: background-color 0.1s;
                     position: relative;
-                    border: 0.5px solid var(--border);
+                    border: 0.5px solid #e7edf8;
                 }
                 
                 .time-slot.selected {
@@ -732,7 +871,7 @@ function ScheduleDemoContent() {
                 }
                 
                 .time-slot:hover {
-                    background-color: var(--secondary);
+                    background-color: var(--primary-soft);
                     z-index: 3;
                 }
                 
@@ -769,6 +908,13 @@ function ScheduleDemoContent() {
                     }
                 }
             `}</style>
+            
+            <LoginModal 
+                isOpen={showLoginModal} 
+                onClose={() => setShowLoginModal(false)}
+                title="デモスケジュールに参加"
+                description="デモスケジュールに参加するにはログインが必要です。"
+            />
         </div>
     );
 }
@@ -823,7 +969,7 @@ function formatDate(date: Date): string {
     return `${month}/${day} (${weekday})`;
 }
 
-function getAvailability(participants: { name: string, slots: string[] }[], slotId: string): number {
+function getAvailability(participants: { id: string; name: string; slots: string[] }[], slotId: string): number {
     return participants.filter(p => p.slots.includes(slotId)).length;
 }
 

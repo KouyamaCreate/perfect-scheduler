@@ -1,4 +1,4 @@
-# Perfect Scheduler
+# Meetrace
 
 スケジュール調整を簡単に、美しく行うためのウェブアプリケーション。
 
@@ -162,7 +162,7 @@ Your Name
 
 ## 環境変数の設定方法
 
-Perfect Schedulerを動作させるためには、Firebaseプロジェクトの設定情報を環境変数として設定する必要があります。以下の手順に従って設定してください。
+Meetraceを動作させるためには、Firebaseプロジェクトの設定情報を環境変数として設定する必要があります。以下の手順に従って設定してください。
 
 > **詳細な手順**: より詳細なFirebase設定ガイドは[docs/firebase-setup-guide.md](docs/firebase-setup-guide.md)を参照してください。
 

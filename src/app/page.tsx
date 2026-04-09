@@ -1,165 +1,159 @@
 import Image from "next/image";
 import Link from "next/link";
+import { AppHeader } from "@/components/AppHeader";
 
 export default function Home() {
   return (
-    <div className="flex flex-col min-h-screen">
-      {/* ヘッダー */}
-      <header className="border-b border-[var(--border)]">
-        <div className="container flex justify-between items-center py-4">
-          <div className="flex items-center gap-2">
-            <Image
-              src="/calendar-icon.svg"
-              alt="Perfect Scheduler Logo"
-              width={32}
-              height={32}
-              className="hidden sm:block"
-            />
-            <h1 className="text-xl font-bold bg-gradient-to-r from-[var(--primary)] to-[var(--accent)] text-transparent bg-clip-text">
-              Perfect Scheduler
-            </h1>
-          </div>
-          <nav className="flex items-center gap-4">
-            <Link
-              href="/about"
-              className="text-[var(--foreground)] hover:text-[var(--primary)] transition"
-            >
-              使い方
-            </Link>
-            <Link href="/login" className="btn btn-secondary">
-              ログイン
-            </Link>
-            <Link href="/create" className="btn btn-primary">
-              新規作成
-            </Link>
-          </nav>
-        </div>
-      </header>
+    <div className="flex flex-col min-h-screen" suppressHydrationWarning>
+      <AppHeader />
 
-      {/* メインコンテンツ */}
       <main className="flex-1">
-        {/* ヒーローセクション */}
-        <section className="py-16 md:py-24">
-          <div className="container">
-            <div className="grid md:grid-cols-2 gap-8 items-center">
-              <div>
-                <h2 className="text-4xl md:text-5xl font-bold mb-4">
-                  スケジュール調整を
-                  <br />
-                  <span className="text-[var(--primary)]">簡単に。美しく。</span>
+        <section className="relative overflow-hidden py-14 md:py-20">
+          <div className="absolute inset-x-0 top-0 h-[26rem] bg-[radial-gradient(circle_at_top_left,rgba(115,165,255,0.20),transparent_42%),linear-gradient(180deg,#f8fbff_0%,rgba(248,251,255,0)_100%)]" />
+          <div className="container relative">
+            <div className="grid items-center gap-10 lg:grid-cols-[1.05fr_0.95fr]">
+              <div className="space-y-6">
+                <p className="eyebrow">Meetrace</p>
+                <h2 className="text-[2.5rem] font-medium leading-[1.22] tracking-[0.04em] text-[var(--foreground)] md:text-[3.4rem]">
+                  <span className="block">なぞって選んで、</span>
+                  <span className="block text-[var(--primary)]">重なる時間をすぐ見つける。</span>
                 </h2>
-                <p className="text-lg mb-8 text-[var(--foreground)] opacity-80">
-                  Perfect Schedulerでグループのスケジュール調整をスムーズに。
-                  直感的な操作で最適な日程を見つけましょう。
+                <p className="max-w-[38rem] text-base leading-7 text-[var(--foreground-muted)] md:text-lg">
+                  Meetrace は、カレンダー上をドラッグして候補時間を直感的に選び、
+                  参加者どうしで重なり合う時間をすばやく見つけるためのスケジュール調整サービスです。
                 </p>
-                <div className="flex flex-wrap gap-4">
-                  <Link href="/create" className="btn btn-primary">
-                    スケジュールを作成する
+                <div className="flex flex-wrap gap-3">
+                  <Link href="/create" prefetch={false} className="btn btn-primary">
+                    新しく調整を始める
                   </Link>
-                  <Link href="/demo" className="btn btn-secondary">
-                    デモを見る
+                  <Link href="/schedule/demo" prefetch={false} className="btn btn-secondary">
+                    デモで操作感を見る
                   </Link>
                 </div>
+                <div className="flex flex-wrap gap-2">
+                  <span className="status-pill">ドラッグで一括選択</span>
+                  <span className="status-pill">青の濃淡で重なり可視化</span>
+                  <span className="status-pill">匿名参加にも対応</span>
+                </div>
               </div>
-              <div className="relative h-[300px] md:h-[400px] rounded-lg overflow-hidden">
-                <Image
-                  src="/scheduler-preview.png"
-                  alt="Perfect Scheduler Preview"
-                  fill
-                  style={{ objectFit: "cover" }}
-                  className="rounded-lg"
-                />
+
+              <div className="surface-card overflow-hidden p-4 md:p-5">
+                <div className="mb-4 flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-bold text-[var(--primary)]">Preview</p>
+                    <p className="text-sm text-[var(--foreground-muted)]">会える時間を一目で判断</p>
+                  </div>
+                  <div className="rounded-full bg-[var(--primary-soft)] px-3 py-1 text-xs font-bold text-[var(--primary-strong)]">
+                    drag + overlap
+                  </div>
+                </div>
+                <div className="relative h-[320px] overflow-hidden rounded-xl border border-[var(--border)] bg-white md:h-[400px]">
+                  <Image
+                    src="/scheduler-preview.png"
+                    alt="Meetrace Preview"
+                    fill
+                    style={{ objectFit: "cover" }}
+                    className="rounded-xl"
+                  />
+                </div>
+                <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                  <div className="rounded-xl bg-[var(--primary-soft)] px-4 py-3">
+                    <p className="text-xs font-bold text-[var(--primary-strong)]">1</p>
+                    <p className="mt-1 text-sm text-[var(--foreground-muted)]">時間帯をなぞって回答</p>
+                  </div>
+                  <div className="rounded-xl bg-white px-4 py-3 ring-1 ring-[var(--border)]">
+                    <p className="text-xs font-bold text-[var(--primary-strong)]">2</p>
+                    <p className="mt-1 text-sm text-[var(--foreground-muted)]">重なりを青の濃淡で確認</p>
+                  </div>
+                  <div className="rounded-xl bg-[var(--secondary)] px-4 py-3">
+                    <p className="text-xs font-bold text-[var(--primary-strong)]">3</p>
+                    <p className="mt-1 text-sm text-[var(--foreground-muted)]">会える時間をその場で決定</p>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
         </section>
 
-        {/* 機能説明セクション */}
-        <section className="py-16 bg-[var(--secondary)]">
+        <section className="py-12 md:py-16">
           <div className="container">
-            <h2 className="text-2xl md:text-3xl font-bold text-center mb-12">
-              簡単3ステップでスケジュール調整
-            </h2>
-            <div className="grid md:grid-cols-3 gap-8">
-              <div className="bg-[var(--background)] p-6 rounded-lg shadow">
-                <div className="w-12 h-12 bg-[var(--primary)] text-[var(--primary-foreground)] rounded-full flex items-center justify-center font-bold text-xl mb-4">
+            <div className="mb-10 text-center">
+              <p className="eyebrow mb-3">How it works</p>
+              <h2 className="text-[2rem] font-medium tracking-[0.02em] text-[var(--foreground)] md:text-[2.4rem]">
+                調整のストレスを減らす、3つの体験
+              </h2>
+            </div>
+            <div className="grid gap-6 md:grid-cols-3">
+              <div className="surface-card p-6">
+                <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-[var(--primary-soft)] text-lg font-bold text-[var(--primary-strong)]">
                   1
                 </div>
-                <h3 className="text-xl font-semibold mb-2">イベントを作成</h3>
-                <p className="text-[var(--foreground)] opacity-80">
-                  イベント名と候補日時を設定するだけで、スケジュール調整ページが作成できます。
+                <h3 className="mb-2 text-lg font-bold text-[var(--foreground)]">候補時間を用意</h3>
+                <p className="text-sm leading-6 text-[var(--foreground-muted)]">
+                  イベント名と候補日を設定するだけで、回答用のタイムラインをすぐ共有できます。
                 </p>
               </div>
-              <div className="bg-[var(--background)] p-6 rounded-lg shadow">
-                <div className="w-12 h-12 bg-[var(--primary)] text-[var(--primary-foreground)] rounded-full flex items-center justify-center font-bold text-xl mb-4">
+              <div className="surface-card p-6">
+                <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-[var(--primary-soft)] text-lg font-bold text-[var(--primary-strong)]">
                   2
                 </div>
-                <h3 className="text-xl font-semibold mb-2">リンクを共有</h3>
-                <p className="text-[var(--foreground)] opacity-80">
-                  生成されたURLを参加者に共有。登録不要で簡単に回答できます。
+                <h3 className="mb-2 text-lg font-bold text-[var(--foreground)]">ドラッグで回答</h3>
+                <p className="text-sm leading-6 text-[var(--foreground-muted)]">
+                  参加者はカレンダーをなぞるだけで、連続した空き時間をまとめて選択できます。
                 </p>
               </div>
-              <div className="bg-[var(--background)] p-6 rounded-lg shadow">
-                <div className="w-12 h-12 bg-[var(--primary)] text-[var(--primary-foreground)] rounded-full flex items-center justify-center font-bold text-xl mb-4">
+              <div className="surface-card p-6">
+                <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-[var(--primary-soft)] text-lg font-bold text-[var(--primary-strong)]">
                   3
                 </div>
-                <h3 className="text-xl font-semibold mb-2">最適な日程を決定</h3>
-                <p className="text-[var(--foreground)] opacity-80">
-                  全員の回答をビジュアルで確認し、最も都合の良い日時を簡単に見つけられます。
+                <h3 className="mb-2 text-lg font-bold text-[var(--foreground)]">重なりを判断</h3>
+                <p className="text-sm leading-6 text-[var(--foreground-muted)]">
+                  回答の重なりは青のグラデーションで可視化され、会いやすい時間帯がすぐ見つかります。
                 </p>
               </div>
             </div>
           </div>
         </section>
 
-        {/* CTAセクション */}
-        <section className="py-16 bg-gradient-to-r from-[var(--primary)] to-[var(--accent)] text-[var(--primary-foreground)]">
-          <div className="container text-center">
-            <h2 className="text-2xl md:text-3xl font-bold mb-4">
-              今すぐスケジュール調整を始めましょう
-            </h2>
-            <p className="text-lg mb-8 max-w-2xl mx-auto opacity-90">
-              アカウント登録不要。すぐに使えて、すぐに共有できます。
-            </p>
-            <Link
-              href="/create"
-              className="btn bg-white text-[var(--primary)] hover:bg-opacity-90"
+        <section className="py-12 md:py-16">
+          <div className="container">
+            <div
+              className="overflow-hidden rounded-[0.75rem] px-6 py-8 text-[var(--primary-foreground)] shadow-[0_0_1rem_rgba(0,0,0,0.1),0_0.125rem_0.25rem_rgba(0,0,0,0.2)] md:px-10 md:py-10"
+              style={{ background: 'linear-gradient(135deg, #143278 0%, #1e46aa 36%, #2864f0 100%)' }}
             >
-              無料で始める
-            </Link>
+              <div className="flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
+                <div className="max-w-2xl">
+                  <p className="mb-2 text-sm font-bold uppercase tracking-[0.08em] text-white/80">Start now</p>
+                  <h2 className="text-[2rem] font-medium leading-[1.25] tracking-[0.03em] md:text-[2.5rem]">
+                    Meetrace で、
+                    予定調整をもっと軽く。
+                  </h2>
+                  <p className="mt-3 text-base leading-7 text-white/82">
+                    アカウント登録なしでも始められます。候補時間を作って、すぐ共有し、会える時間を決めましょう。
+                  </p>
+                </div>
+                <Link
+                  href="/create"
+                  prefetch={false}
+                  className="btn border border-white bg-white hover:bg-[var(--primary-soft)]"
+                  style={{ color: 'var(--primary)' }}
+                >
+                  無料で始める
+                </Link>
+              </div>
+            </div>
           </div>
         </section>
       </main>
 
-      {/* フッター */}
       <footer className="border-t border-[var(--border)] py-8">
         <div className="container">
           <div className="flex flex-col md:flex-row justify-between items-center gap-4">
             <div className="text-center md:text-left">
-              <p className="font-semibold mb-1">Perfect Scheduler</p>
-              <p className="text-sm text-[var(--foreground)] opacity-70">
+              <p className="font-semibold mb-1 text-[var(--foreground)]">Meetrace</p>
+              <p className="text-sm text-[var(--foreground-muted)]">
                 © 2025 All rights reserved.
               </p>
-            </div>
-            <div className="flex gap-6">
-              <Link
-                href="/terms"
-                className="text-sm text-[var(--foreground)] opacity-70 hover:opacity-100"
-              >
-                利用規約
-              </Link>
-              <Link
-                href="/privacy"
-                className="text-sm text-[var(--foreground)] opacity-70 hover:opacity-100"
-              >
-                プライバシーポリシー
-              </Link>
-              <Link
-                href="/contact"
-                className="text-sm text-[var(--foreground)] opacity-70 hover:opacity-100"
-              >
-                お問い合わせ
-              </Link>
             </div>
           </div>
         </div>

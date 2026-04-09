@@ -1,6 +1,6 @@
 # Firebase Emulatorを使用したテスト方法
 
-Perfect Schedulerでは、Firebase Emulatorを使用してローカル環境でFirebaseの機能をテストできます。これにより、実際のFirebaseプロジェクトを使用せずに開発とテストが可能になります。
+Meetraceでは、Firebase Emulatorを使用してローカル環境でFirebaseの機能をテストできます。これにより、実際のFirebaseプロジェクトを使用せずに開発とテストが可能になります。
 
 ## Firebase Emulatorのセットアップ
 

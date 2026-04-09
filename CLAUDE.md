@@ -1,8 +1,8 @@
-# CLAUDE.md - Perfect Scheduler
+# CLAUDE.md - Meetrace
 
 ## プロジェクト概要
 
-Perfect Schedulerは、スケジュール調整を簡単に、美しく行うためのNext.jsベースのウェブアプリケーションです。
+Meetraceは、スケジュール調整を簡単に、美しく行うためのNext.jsベースのウェブアプリケーションです。
 
 ## 技術スタック
 

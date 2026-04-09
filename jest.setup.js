@@ -23,6 +23,9 @@ jest.mock('firebase/firestore', () => {
         collection: jest.fn().mockImplementation((db, path) => ({
             path,
         })),
+        collectionGroup: jest.fn().mockImplementation((db, path) => ({
+            path,
+        })),
         getDoc: jest.fn().mockImplementation(() =>
             Promise.resolve({
                 exists: jest.fn().mockReturnValue(true),
@@ -38,6 +41,7 @@ jest.mock('firebase/firestore', () => {
                 }),
             })
         ),
+        getDocs: jest.fn().mockResolvedValue({ docs: [] }),
         setDoc: jest.fn().mockResolvedValue({}),
         addDoc: jest.fn().mockResolvedValue({ id: 'mock-doc-id' }),
         onSnapshot: jest.fn().mockImplementation((query, callback) => {
@@ -65,6 +69,57 @@ jest.mock('firebase/firestore', () => {
         }),
         query: jest.fn().mockImplementation((collection) => collection),
         orderBy: jest.fn().mockReturnValue({}),
+        where: jest.fn().mockReturnValue({}),
+    };
+});
+
+const mockAuth = {
+    currentUser: null,
+    authStateReady: jest.fn().mockResolvedValue(undefined),
+};
+
+jest.mock('firebase/auth', () => {
+    const GoogleAuthProvider = jest.fn().mockImplementation(() => ({
+        setCustomParameters: jest.fn(),
+    }));
+
+    return {
+        getAuth: jest.fn().mockReturnValue(mockAuth),
+        signInAnonymously: jest.fn().mockImplementation(async () => {
+            const user = {
+                uid: 'mock-anonymous-user',
+                isAnonymous: true,
+                getIdToken: jest.fn().mockResolvedValue('mock-token'),
+            };
+            mockAuth.currentUser = user;
+            return { user };
+        }),
+        signInWithPopup: jest.fn().mockResolvedValue({
+            user: {
+                uid: 'mock-google-user',
+                displayName: 'Mock User',
+                photoURL: null,
+                providerData: [],
+            },
+        }),
+        GoogleAuthProvider,
+        signOut: jest.fn().mockResolvedValue(undefined),
+        onAuthStateChanged: jest.fn().mockImplementation((_auth, callback) => {
+            callback(mockAuth.currentUser);
+            return jest.fn();
+        }),
+        updateProfile: jest.fn().mockResolvedValue(undefined),
+        signInWithRedirect: jest.fn().mockResolvedValue(undefined),
+        getRedirectResult: jest.fn().mockResolvedValue(null),
+        linkWithPopup: jest.fn().mockResolvedValue({
+            user: {
+                uid: 'mock-google-user',
+                displayName: 'Mock User',
+                photoURL: null,
+                providerData: [],
+            },
+        }),
+        linkWithRedirect: jest.fn().mockResolvedValue(undefined),
     };
 });
 

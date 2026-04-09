@@ -1,122 +1,132 @@
 import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import CreateSchedule from '@/app/create/page';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { setDoc } from 'firebase/firestore';
 import { useRouter } from 'next/navigation';
+import CreateSchedule from '@/app/create/page';
+import { useAuth } from '@/contexts/AuthContext';
 
-// next/navigationのモック
 jest.mock('next/navigation', () => ({
     useRouter: jest.fn(),
 }));
 
+jest.mock('@/contexts/AuthContext', () => ({
+    useAuth: jest.fn(),
+}));
+
+jest.mock('@/components/AppHeader', () => ({
+    AppHeader: () => <div>AppHeader</div>,
+}));
+
+jest.mock('@/components/InlineCalendar', () => ({
+    InlineCalendar: ({ ariaLabel }: { ariaLabel: string }) => <div>{ariaLabel}</div>,
+}));
+
 describe('CreateSchedule', () => {
-    // テスト前の準備
+    const mockPush = jest.fn();
+    const mockAlert = jest.spyOn(window, 'alert').mockImplementation(() => { });
+    const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => { });
+
     beforeEach(() => {
-        // useRouterのモック
-        const mockPush = jest.fn();
-        (useRouter as jest.Mock).mockReturnValue({
-            push: mockPush,
+        jest.clearAllMocks();
+        (useRouter as jest.Mock).mockReturnValue({ push: mockPush });
+        (useAuth as jest.Mock).mockReturnValue({
+            user: {
+                uid: 'existing-user',
+                getIdToken: jest.fn().mockResolvedValue('existing-token'),
+            },
+            loading: false,
+            signInAnonymously: jest.fn(),
         });
     });
+
+    afterAll(() => {
+        mockAlert.mockRestore();
+        consoleErrorSpy.mockRestore();
+    });
+
+    const fillRequiredFields = () => {
+        fireEvent.change(screen.getByLabelText(/イベント名/i), {
+            target: { value: 'テストイベント' },
+        });
+        fireEvent.change(screen.getByLabelText(/開始日/i), {
+            target: { value: '2025-05-15' },
+        });
+        fireEvent.change(screen.getByLabelText(/終了日/i), {
+            target: { value: '2025-05-17' },
+        });
+    };
 
     test('フォームが正しくレンダリングされること', () => {
         render(<CreateSchedule />);
 
-        // 必要なフォーム要素が存在することを確認
         expect(screen.getByLabelText(/イベント名/i)).toBeInTheDocument();
         expect(screen.getByLabelText(/説明/i)).toBeInTheDocument();
         expect(screen.getByLabelText(/開始日/i)).toBeInTheDocument();
         expect(screen.getByLabelText(/終了日/i)).toBeInTheDocument();
-        expect(screen.getByLabelText(/開始時間/i)).toBeInTheDocument();
-        expect(screen.getByLabelText(/終了時間/i)).toBeInTheDocument();
-        expect(screen.getByLabelText(/時間枠の長さ/i)).toBeInTheDocument();
         expect(screen.getByRole('button', { name: /スケジュールを作成/i })).toBeInTheDocument();
     });
 
-    test('フォーム送信時にFirestoreにデータが保存されること', async () => {
+    test('既存ユーザーでフォーム送信時にFirestoreへ保存して遷移すること', async () => {
         render(<CreateSchedule />);
 
-        // フォームに値を入力
-        fireEvent.change(screen.getByLabelText(/イベント名/i), {
-            target: { value: 'テストイベント' },
-        });
-        fireEvent.change(screen.getByLabelText(/説明/i), {
-            target: { value: 'テスト用の説明' },
-        });
-        fireEvent.change(screen.getByLabelText(/開始日/i), {
-            target: { value: '2025-05-15' },
-        });
-        fireEvent.change(screen.getByLabelText(/終了日/i), {
-            target: { value: '2025-05-17' },
-        });
-        fireEvent.change(screen.getByLabelText(/開始時間/i), {
-            target: { value: '09:00' },
-        });
-        fireEvent.change(screen.getByLabelText(/終了時間/i), {
-            target: { value: '17:00' },
-        });
-        fireEvent.change(screen.getByLabelText(/時間枠の長さ/i), {
-            target: { value: '30' },
-        });
-
-        // フォームを送信
+        fillRequiredFields();
         fireEvent.click(screen.getByRole('button', { name: /スケジュールを作成/i }));
 
-        // FirestoreのsetDocが呼ばれたことを確認
         await waitFor(() => {
             expect(setDoc).toHaveBeenCalled();
         });
 
-        // 正しいデータで呼ばれたことを確認
         expect(setDoc).toHaveBeenCalledWith(
             expect.anything(),
             expect.objectContaining({
                 name: 'テストイベント',
-                description: 'テスト用の説明',
                 startDate: '2025-05-15',
                 endDate: '2025-05-17',
-                startTime: '09:00',
-                endTime: '17:00',
-                duration: 30,
+                creatorId: 'existing-user',
             })
         );
-
-        // ルーターのpushが呼ばれたことを確認
-        const { push } = useRouter();
-        expect(push).toHaveBeenCalled();
-        expect(push).toHaveBeenCalledWith(expect.stringMatching(/^\/schedule\/.+$/));
+        expect(mockPush).toHaveBeenCalledWith(expect.stringMatching(/^\/schedule\/.+$/));
     });
 
-    test('エラー発生時にアラートが表示されること', async () => {
-        // setDocがエラーを投げるようにモック
-        (setDoc as jest.Mock).mockRejectedValueOnce(new Error('テストエラー'));
+    test('未認証なら匿名ログイン後のユーザーで保存すること', async () => {
+        const anonymousUser = {
+            uid: 'anonymous-user',
+            getIdToken: jest.fn().mockResolvedValue('anonymous-token'),
+        };
+        const signInAnonymously = jest.fn().mockResolvedValue(anonymousUser);
 
-        // windowのalertをモック
-        const alertMock = jest.spyOn(window, 'alert').mockImplementation(() => { });
+        (useAuth as jest.Mock).mockReturnValue({
+            user: null,
+            loading: false,
+            signInAnonymously,
+        });
 
         render(<CreateSchedule />);
 
-        // フォームに最低限の値を入力
-        fireEvent.change(screen.getByLabelText(/イベント名/i), {
-            target: { value: 'テストイベント' },
-        });
-        fireEvent.change(screen.getByLabelText(/開始日/i), {
-            target: { value: '2025-05-15' },
-        });
-        fireEvent.change(screen.getByLabelText(/終了日/i), {
-            target: { value: '2025-05-17' },
-        });
-
-        // フォームを送信
+        fillRequiredFields();
         fireEvent.click(screen.getByRole('button', { name: /スケジュールを作成/i }));
 
-        // エラーアラートが表示されることを確認
         await waitFor(() => {
-            expect(alertMock).toHaveBeenCalled();
-            expect(alertMock).toHaveBeenCalledWith(expect.stringContaining('エラー'));
+            expect(signInAnonymously).toHaveBeenCalled();
+            expect(setDoc).toHaveBeenCalledWith(
+                expect.anything(),
+                expect.objectContaining({
+                    creatorId: 'anonymous-user',
+                })
+            );
         });
+    });
 
-        // モックをリストア
-        alertMock.mockRestore();
+    test('保存エラー時にアラートが表示されること', async () => {
+        (setDoc as jest.Mock).mockRejectedValueOnce(new Error('テストエラー'));
+
+        render(<CreateSchedule />);
+
+        fillRequiredFields();
+        fireEvent.click(screen.getByRole('button', { name: /スケジュールを作成/i }));
+
+        await waitFor(() => {
+            expect(mockAlert).toHaveBeenCalledWith(expect.stringContaining('エラー'));
+        });
     });
 });

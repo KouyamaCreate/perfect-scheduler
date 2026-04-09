@@ -16,7 +16,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   title = "ログインしてスケジュールに参加",
   description = "スケジュールに参加するにはログインが必要です。" 
 }) => {
-  const { signInAnonymously, signInWithGoogle, loading } = useAuth();
+  const { signInAnonymously, signInWithGoogle, signInWithGoogleRedirect, loading } = useAuth();
   const [error, setError] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -66,9 +66,11 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       setError(null);
       console.log('🔵 Googleログイン開始');
       setSubmitting(true);
-      await signInWithGoogle();
-      console.log('✅ Googleログイン成功');
-      onClose();
+      const user = await signInWithGoogle();
+      if (user) {
+        console.log('✅ Googleログイン成功');
+        onClose();
+      }
     } catch (err: unknown) {
       // ポップアップが閉じられた/ブロックされた場合は、自動フォールバックせずユーザーに案内
       const code = (typeof err === 'object' && err && 'code' in err) ? (err as { code?: string }).code : undefined;
@@ -112,18 +114,31 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     }
   };
 
-  // リダイレクト方式は現在提供しない（ポップアップ方式のみ）
+  const handleGoogleRedirect = async () => {
+    if (submitting) return;
+    setError(null);
+    try {
+      setSubmitting(true);
+      await signInWithGoogleRedirect();
+    } catch (err) {
+      console.error('❌ Googleリダイレクトログインエラー:', err);
+      setError('リダイレクト方式のログインに失敗しました。');
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(20,50,120,0.24)] px-4 backdrop-blur-[2px]">
+      <div className="surface-card w-full max-w-md rounded-2xl p-6">
         <div className="text-center mb-6">
-          <h2 className="text-2xl font-bold text-gray-900 mb-2">{title}</h2>
-          <p className="text-gray-600">{description}</p>
+          <p className="eyebrow mb-2">Meetrace</p>
+          <h2 className="mb-2 text-2xl font-bold text-[var(--foreground)]">{title}</h2>
+          <p className="text-[var(--foreground-muted)]">{description}</p>
         </div>
 
         {error && (
-          <div className="mb-4 p-3 bg-red-100 border border-red-400 text-red-700 rounded">
+          <div className="mb-4 rounded-xl border border-[#dc1e32] bg-[rgba(220,30,50,0.08)] p-3 text-sm text-[#a51428]">
             {error}
           </div>
         )}
@@ -133,16 +148,25 @@ export const LoginModal: React.FC<LoginModalProps> = ({
           <button
             onClick={handleGoogleLogin}
             disabled={submitting}
-            className="w-full flex items-center justify-center px-4 py-2 border border-gray-300 rounded-md shadow-sm bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="btn btn-primary w-full"
             title="ポップアップが許可されている場合はこちら"
           >
             {submitting ? 'ログイン中...' : 'Googleでログイン'}
           </button>
 
           <button
+            onClick={handleGoogleRedirect}
+            disabled={submitting}
+            className="btn btn-secondary w-full"
+            title="ポップアップが使えない場合はこちら"
+          >
+            {submitting ? 'リダイレクト中...' : 'リダイレクトでGoogleログイン'}
+          </button>
+
+          <button
             onClick={handleAnonymousLogin}
             disabled={submitting}
-            className="w-full flex items-center justify-center px-4 py-2 border border-gray-300 rounded-md shadow-sm bg-gray-100 text-sm font-medium text-gray-700 hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="btn w-full border border-[var(--border)] bg-[var(--secondary)] text-[var(--foreground)] hover:bg-[var(--primary-soft)]"
           >
             <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
@@ -154,13 +178,13 @@ export const LoginModal: React.FC<LoginModalProps> = ({
         <div className="mt-4 text-center">
           <button
             onClick={onClose}
-            className="text-sm text-gray-500 hover:text-gray-700"
+            className="text-sm text-[var(--foreground-subtle)] hover:text-[var(--foreground)]"
           >
             キャンセル
           </button>
         </div>
 
-        <div className="mt-4 text-xs text-gray-500 text-center">
+        <div className="mt-4 rounded-xl bg-[var(--secondary)] px-4 py-3 text-center text-xs text-[var(--foreground-muted)]">
           <p>匿名ログインでは、ブラウザを閉じるとデータが失われる場合があります。</p>
           <p>継続的に利用する場合はGoogleログインをお勧めします。</p>
         </div>

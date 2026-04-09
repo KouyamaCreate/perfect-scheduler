@@ -1,23 +1,111 @@
-import { 
-  signInAnonymously, 
-  signInWithPopup, 
-  GoogleAuthProvider, 
-  signOut,
-  onAuthStateChanged,
-  updateProfile,
-  signInWithRedirect,
+import {
+  GoogleAuthProvider,
+  User,
   getRedirectResult,
-  User
+  linkWithPopup,
+  linkWithRedirect,
+  onAuthStateChanged,
+  signInAnonymously,
+  signInWithPopup,
+  signInWithRedirect,
+  signOut,
+  updateProfile,
 } from 'firebase/auth';
-import { auth } from './firebase';
+import { collection, collectionGroup, doc, getDoc, getDocs, query, setDoc, where } from 'firebase/firestore';
+import { auth, db } from './firebase';
 
-// Google認証プロバイダーの設定
+type FirebaseLikeError = {
+  code?: string;
+  message?: string;
+};
+
 const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({
-  prompt: 'select_account'
+  prompt: 'select_account',
 });
 
-// 匿名ログイン
+async function syncGoogleProfile(user: User): Promise<void> {
+  const providerData = user.providerData?.[0];
+  if (!providerData) return;
+
+  try {
+    await updateProfile(user, {
+      displayName: user.displayName || providerData.displayName || undefined,
+      photoURL: user.photoURL || providerData.photoURL || undefined,
+    });
+  } catch {
+    // noop
+  }
+}
+
+async function migrateAnonParticipants(oldUid: string, newUid: string): Promise<void> {
+  const participantsQuery = query(collectionGroup(db, 'participants'), where('userId', '==', oldUid));
+  const participantsSnapshot = await getDocs(participantsQuery);
+
+  const participantTasks = participantsSnapshot.docs.map(async (participantDoc) => {
+    const parentSchedule = participantDoc.ref.parent.parent;
+    if (!parentSchedule) return;
+
+    const data = participantDoc.data() as {
+      createdAt?: { toDate?: () => Date } | Date;
+      name?: string;
+      slots?: string[];
+    };
+    const targetRef = doc(db, 'schedules', parentSchedule.id, 'participants', newUid);
+    const existingTarget = await getDoc(targetRef);
+    const existingData = existingTarget.exists()
+      ? (existingTarget.data() as { createdAt?: { toDate?: () => Date } | Date; name?: string; slots?: string[] })
+      : null;
+
+    const existingSlots = Array.isArray(existingData?.slots) ? existingData.slots : [];
+    const oldSlots = Array.isArray(data?.slots) ? data.slots : [];
+    const mergedSlots = Array.from(new Set([...existingSlots, ...oldSlots]));
+
+    const toDate = (value?: { toDate?: () => Date } | Date): Date | null => {
+      if (!value) return null;
+      if (value instanceof Date) return value;
+      if (typeof value.toDate === 'function') return value.toDate();
+      return null;
+    };
+
+    const createdAtOld = toDate(data.createdAt);
+    const createdAtNew = toDate(existingData?.createdAt);
+    const createdAt =
+      createdAtOld && createdAtNew
+        ? createdAtOld < createdAtNew ? createdAtOld : createdAtNew
+        : createdAtOld || createdAtNew || new Date();
+
+    await setDoc(
+      targetRef,
+      {
+        userId: newUid,
+        name: existingData?.name || data?.name || '',
+        slots: mergedSlots,
+        createdAt,
+        updatedAt: new Date(),
+      },
+      { merge: true }
+    );
+  });
+
+  await Promise.all(participantTasks);
+
+  const schedulesQuery = query(collection(db, 'schedules'), where('creatorId', '==', oldUid));
+  const schedulesSnapshot = await getDocs(schedulesQuery);
+  await Promise.all(
+    schedulesSnapshot.docs.map((scheduleDoc) =>
+      setDoc(
+        doc(db, 'schedules', scheduleDoc.id),
+        {
+          creatorId: newUid,
+          updatedAt: new Date(),
+        },
+        { merge: true }
+      )
+    )
+  );
+}
+
 export const signInAsAnonymous = async (): Promise<User | null> => {
   try {
     const result = await signInAnonymously(auth);
@@ -28,70 +116,107 @@ export const signInAsAnonymous = async (): Promise<User | null> => {
   }
 };
 
-// Googleログイン
 export const signInWithGoogle = async (): Promise<User | null> => {
+  const currentUser = auth.currentUser;
+  const oldAnonUid = currentUser?.isAnonymous ? currentUser.uid : null;
+
   try {
-    // 通常のサインイン（匿名からのリンクやデータ移行は行わない）
-    const result = await signInWithPopup(auth, googleProvider);
-    // プロフィール初期同期（任意）
-    const providerData = result.user.providerData?.[0];
-    if (providerData) {
-      await updateProfile(result.user, {
-        displayName: result.user.displayName || providerData.displayName || undefined,
-        photoURL: result.user.photoURL || providerData.photoURL || undefined,
-      });
+    if (currentUser && currentUser.isAnonymous) {
+      const linkResult = await linkWithPopup(currentUser, googleProvider);
+      await syncGoogleProfile(linkResult.user);
+      try {
+        localStorage.setItem('ps_mergedAnonUid', currentUser.uid);
+      } catch {}
+      return linkResult.user;
     }
+
+    const result = await signInWithPopup(auth, googleProvider);
+    if (oldAnonUid && result.user.uid !== oldAnonUid) {
+      await migrateAnonParticipants(oldAnonUid, result.user.uid);
+      try {
+        localStorage.setItem('ps_mergedAnonUid', oldAnonUid);
+      } catch {}
+    }
+    await syncGoogleProfile(result.user);
     return result.user;
   } catch (error: unknown) {
-    // ユーザーがポップアップを閉じた場合は静かに中断
-    const code = (typeof error === 'object' && error && 'code' in error) ? (error as { code?: string }).code : undefined;
+    const { code } = (typeof error === 'object' && error ? error as FirebaseLikeError : {});
+
     if (code === 'auth/popup-closed-by-user') {
       return null;
     }
-    // 既存アカウントなどの他エラー
+
+    if (code === 'auth/credential-already-in-use') {
+      const result = await signInWithPopup(auth, googleProvider);
+      if (oldAnonUid && result.user.uid !== oldAnonUid) {
+        await migrateAnonParticipants(oldAnonUid, result.user.uid);
+        try {
+          localStorage.setItem('ps_mergedAnonUid', oldAnonUid);
+        } catch {}
+      }
+      await syncGoogleProfile(result.user);
+      return result.user;
+    }
+
     console.error('Googleログインエラー:', error);
     throw error;
   }
 };
 
-// ポップアップがブロックされる環境用のリダイレクト方式
 export const signInWithGoogleRedirect = async (): Promise<void> => {
+  const currentUser = auth.currentUser;
+
   try {
-    try { sessionStorage.setItem('ps_redirect_pending', '1'); } catch {}
-    // 常に通常のリダイレクトサインイン（匿名からのリンクは行わない）
-    await signInWithRedirect(auth, googleProvider); // ここでブラウザ遷移
+    try {
+      sessionStorage.setItem('ps_redirect_pending', '1');
+    } catch {}
+
+    if (currentUser && currentUser.isAnonymous) {
+      try {
+        localStorage.setItem('ps_lastAnonUid', currentUser.uid);
+      } catch {}
+      await linkWithRedirect(currentUser, googleProvider);
+      return;
+    }
+
+    await signInWithRedirect(auth, googleProvider);
   } catch (error) {
     console.error('Googleリダイレクト方式エラー:', error);
     throw error;
   }
 };
 
-// リダイレクト完了後に呼び出して、プロフィール同期と匿名データの移行を行う
 export const completeGoogleRedirectIfPresent = async (): Promise<User | null> => {
   try {
-    const res = await getRedirectResult(auth);
-    if (!res || !res.user) return null;
-    const user = res.user;
-    // プロフィール初期同期（任意）
-    const providerData = user.providerData?.[0];
-    if (providerData) {
-      try {
-        await updateProfile(user, {
-          displayName: user.displayName || providerData.displayName || undefined,
-          photoURL: user.photoURL || providerData.photoURL || undefined,
-        });
-      } catch {}
+    const result = await getRedirectResult(auth);
+    if (!result?.user) return null;
+
+    await syncGoogleProfile(result.user);
+
+    let oldAnonUid: string | null = null;
+    try {
+      oldAnonUid = localStorage.getItem('ps_lastAnonUid');
+    } catch {}
+
+    if (oldAnonUid && oldAnonUid !== result.user.uid) {
+      await migrateAnonParticipants(oldAnonUid, result.user.uid);
     }
-    try { sessionStorage.removeItem('ps_redirect_pending'); } catch {}
-    return user;
-  } catch (_e) {
-    try { sessionStorage.removeItem('ps_redirect_pending'); } catch {}
-    // リダイレクト未実行時などはここに来ないか、nullになる
+
+    try {
+      localStorage.setItem('ps_mergedAnonUid', oldAnonUid || '');
+      localStorage.removeItem('ps_lastAnonUid');
+      sessionStorage.removeItem('ps_redirect_pending');
+    } catch {}
+
+    return result.user;
+  } catch {
+    try {
+      sessionStorage.removeItem('ps_redirect_pending');
+    } catch {}
     return null;
   }
 };
 
-// ログアウト
 export const logout = async (): Promise<void> => {
   try {
     await signOut(auth);
@@ -101,17 +226,14 @@ export const logout = async (): Promise<void> => {
   }
 };
 
-// 認証状態の監視
 export const onAuthStateChange = (callback: (user: User | null) => void) => {
   return onAuthStateChanged(auth, callback);
 };
 
-// ユーザーが匿名かどうかを判定
 export const isAnonymousUser = (user: User | null): boolean => {
   return user?.isAnonymous ?? false;
 };
 
-// ユーザーの表示名を取得（匿名の場合は「ゲスト」）
 export const getUserDisplayName = (user: User | null): string => {
   if (!user) return 'ゲスト';
   if (user.isAnonymous) return 'ゲスト';

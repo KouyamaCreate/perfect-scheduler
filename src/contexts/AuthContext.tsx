@@ -2,13 +2,21 @@
 
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User } from 'firebase/auth';
-import { onAuthStateChange, signInAsAnonymous, signInWithGoogle, logout, completeGoogleRedirectIfPresent } from '@/lib/auth';
+import {
+  completeGoogleRedirectIfPresent,
+  logout,
+  onAuthStateChange,
+  signInAsAnonymous,
+  signInWithGoogle,
+  signInWithGoogleRedirect,
+} from '@/lib/auth';
 
 interface AuthContextType {
   user: User | null;
   loading: boolean;
-  signInAnonymously: () => Promise<void>;
-  signInWithGoogle: () => Promise<void>;
+  signInAnonymously: () => Promise<User | null>;
+  signInWithGoogle: () => Promise<User | null>;
+  signInWithGoogleRedirect: () => Promise<void>;
   logout: () => Promise<void>;
   isAnonymous: boolean;
 }
@@ -40,6 +48,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       if (currentUser) {
         setUser(currentUser);
         setLoading(false);
+        if (typeof window !== 'undefined' && currentUser.isAnonymous) {
+          try {
+            localStorage.setItem('ps_lastAnonUid', currentUser.uid);
+          } catch {}
+        }
         return;
       }
 
@@ -68,6 +81,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       console.log('🔵 AuthContext: 匿名ログイン開始');
       const user = await signInAsAnonymous();
       console.log('✅ AuthContext: 匿名ログイン成功', user?.uid);
+      return user;
     } catch (error: unknown) {
       console.error('❌ AuthContext: 匿名ログインエラー:', error);
       throw error;
@@ -82,6 +96,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       console.log('🔵 AuthContext: Googleログイン開始');
       const user = await signInWithGoogle();
       console.log('✅ AuthContext: Googleログイン成功', user?.uid);
+      return user;
     } catch (error: unknown) {
       console.error('❌ AuthContext: Googleログインエラー:', error);
       throw error;
@@ -107,6 +122,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     loading,
     signInAnonymously: handleSignInAnonymously,
     signInWithGoogle: handleSignInWithGoogle,
+    signInWithGoogleRedirect: () => signInWithGoogleRedirect(),
     logout: handleLogout,
     isAnonymous: user?.isAnonymous ?? false,
   };

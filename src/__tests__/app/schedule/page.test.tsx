@@ -1,5 +1,6 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { toBlob } from 'html-to-image';
 import SchedulePage from '@/app/schedule/[id]/page';
 import { getDoc, onSnapshot, setDoc } from 'firebase/firestore';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
@@ -26,6 +27,10 @@ jest.mock('@/components/LoginModal', () => ({
 
 jest.mock('@/lib/auth', () => ({
     getUserDisplayName: jest.fn().mockReturnValue('テストログインユーザー'),
+}));
+
+jest.mock('html-to-image', () => ({
+    toBlob: jest.fn(),
 }));
 
 describe('SchedulePage', () => {
@@ -64,6 +69,35 @@ describe('SchedulePage', () => {
     // テスト前の準備
     beforeEach(() => {
         jest.clearAllMocks();
+        (toBlob as jest.Mock).mockResolvedValue(new Blob(['calendar'], { type: 'image/png' }));
+
+        Object.defineProperty(navigator, 'clipboard', {
+            configurable: true,
+            value: {
+                writeText: jest.fn(),
+                write: jest.fn().mockResolvedValue(undefined),
+            },
+        });
+
+        Object.defineProperty(window, 'ClipboardItem', {
+            configurable: true,
+            writable: true,
+            value: jest.fn().mockImplementation((items) => items),
+        });
+
+        Object.defineProperty(HTMLElement.prototype, 'requestFullscreen', {
+            configurable: true,
+            value: jest.fn().mockResolvedValue(undefined),
+        });
+        Object.defineProperty(document, 'exitFullscreen', {
+            configurable: true,
+            value: jest.fn().mockResolvedValue(undefined),
+        });
+        Object.defineProperty(document, 'fullscreenElement', {
+            configurable: true,
+            writable: true,
+            value: null,
+        });
 
         // useParamsのモック
         (useParams as jest.Mock).mockReturnValue({
@@ -164,6 +198,9 @@ describe('SchedulePage', () => {
         const timeLabel = container.querySelector('.time-label');
 
         expect(calendarGrid).toHaveStyle({ overflow: 'visible' });
+        expect(calendarGrid).toHaveStyle({
+            gridTemplateColumns: 'var(--calendar-time-label-width) repeat(3, var(--calendar-slot-width))',
+        });
         expect(cornerHeader).toHaveStyle({ zIndex: '60' });
         expect(dateHeader).toHaveStyle({ zIndex: '50' });
         expect(timeLabel).toHaveStyle({ zIndex: '40' });
@@ -186,10 +223,64 @@ describe('SchedulePage', () => {
             expect(screen.getByText('テスト参加者2')).toBeInTheDocument();
             expect(screen.getByText(/参加者一覧 \(2\)/)).toBeInTheDocument();
             expect(screen.getByText(/重なりが大きい候補/)).toBeInTheDocument();
+            expect(screen.getByLabelText('通常表示')).toBeInTheDocument();
+            expect(screen.getByLabelText('全体表示')).toBeInTheDocument();
+            expect(screen.getByRole('button', { name: '表を全画面表示' })).toBeInTheDocument();
+            expect(screen.getByRole('button', { name: '表を画像コピー' })).toBeInTheDocument();
         });
 
         const overlappingCell = getCell(container, 0, 0);
         expect(overlappingCell).toHaveTextContent('2');
+    });
+
+    test('閲覧画面で全体表示モードに切り替えられること', async () => {
+        (useSearchParams as jest.Mock).mockReturnValue({
+            get: jest.fn((key: string) => (key === 'mode' ? 'view' : null)),
+        });
+
+        const { container } = render(<SchedulePage />);
+
+        await waitForScheduleToLoad();
+
+        const calendarContainer = getCalendarContainer(container);
+        fireEvent.click(screen.getByLabelText('全体表示'));
+
+        await waitFor(() => {
+            expect(calendarContainer).toHaveClass('calendar-container-fit');
+        });
+    });
+
+    test('閲覧画面で表を全画面表示できること', async () => {
+        (useSearchParams as jest.Mock).mockReturnValue({
+            get: jest.fn((key: string) => (key === 'mode' ? 'view' : null)),
+        });
+
+        render(<SchedulePage />);
+
+        await waitForScheduleToLoad();
+
+        fireEvent.click(screen.getByRole('button', { name: '表を全画面表示' }));
+
+        await waitFor(() => {
+            expect(HTMLElement.prototype.requestFullscreen).toHaveBeenCalled();
+        });
+    });
+
+    test('閲覧画面で表全体を画像としてクリップボードにコピーできること', async () => {
+        (useSearchParams as jest.Mock).mockReturnValue({
+            get: jest.fn((key: string) => (key === 'mode' ? 'view' : null)),
+        });
+
+        render(<SchedulePage />);
+
+        await waitForScheduleToLoad();
+
+        fireEvent.click(screen.getByRole('button', { name: '表を画像コピー' }));
+
+        await waitFor(() => {
+            expect(toBlob).toHaveBeenCalled();
+            expect(navigator.clipboard.write).toHaveBeenCalled();
+        });
     });
 
     test('参加情報を登録できること', async () => {

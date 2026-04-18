@@ -83,6 +83,7 @@ function ScheduleDemoContent() {
         ? participants.find((participant) => participant.id === highlightedParticipantId) ?? null
         : null;
     const showResponses = false;
+    const calendarGridTemplateColumns = `var(--calendar-time-label-width) repeat(${dates.length}, var(--calendar-slot-width))`;
 
     useEffect(() => {
         if (highlightedParticipantId && !participants.some((participant) => participant.id === highlightedParticipantId)) {
@@ -729,7 +730,7 @@ function ScheduleDemoContent() {
                             <div
                                 className="calendar-grid"
                                 style={{
-                                    gridTemplateColumns: `auto ${dates.map(() => '1fr').join(' ')}`,
+                                    gridTemplateColumns: calendarGridTemplateColumns,
                                     overflow: 'visible',
                                 }}
                             >
@@ -1033,6 +1034,8 @@ function ScheduleDemoContent() {
 
             <style jsx>{`
                 .calendar-container {
+                    --calendar-slot-width: 40px;
+                    --calendar-time-label-width: 50px;
                     overflow: auto;
                     max-height: 70vh;
                     max-width: 100%;
@@ -1077,14 +1080,15 @@ function ScheduleDemoContent() {
                 
                 .calendar-grid {
                     display: grid;
-                    min-width: max-content;
+                    width: max-content;
                     overflow: visible;
                 }
                 
                 /* 固定ヘッダー */
                 .time-header {
                     min-height: 1.5rem;
-                    min-width: 50px;
+                    width: var(--calendar-time-label-width);
+                    min-width: var(--calendar-time-label-width);
                     padding: 0.25rem;
                     font-size: 0.75rem;
                     display: flex;
@@ -1097,7 +1101,8 @@ function ScheduleDemoContent() {
                 
                 .date-header {
                     min-height: 1.5rem;
-                    min-width: 40px;
+                    width: var(--calendar-slot-width);
+                    min-width: var(--calendar-slot-width);
                     padding: 0.25rem;
                     font-size: 0.75rem;
                     display: flex;
@@ -1111,7 +1116,8 @@ function ScheduleDemoContent() {
                 
                 .time-label {
                     min-height: 1.2rem;
-                    min-width: 50px;
+                    width: var(--calendar-time-label-width);
+                    min-width: var(--calendar-time-label-width);
                     padding: 0.125rem 0.25rem;
                     font-size: 0.625rem;
                     display: flex;
@@ -1125,7 +1131,8 @@ function ScheduleDemoContent() {
                 
                 .time-slot {
                     min-height: 1.2rem;
-                    min-width: 40px;
+                    width: var(--calendar-slot-width);
+                    min-width: var(--calendar-slot-width);
                     cursor: pointer;
                     transition: background-color 0.1s;
                     position: relative;
@@ -1162,28 +1169,26 @@ function ScheduleDemoContent() {
                 /* モバイルデバイス用の調整 */
                 @media (max-width: 768px) {
                     .calendar-container {
+                        --calendar-slot-width: 35px;
+                        --calendar-time-label-width: 45px;
                         max-height: 60vh;
                     }
                     
                     .time-header {
-                        min-width: 45px;
                         min-height: 1.2rem;
                     }
                     
                     .date-header {
-                        min-width: 35px;
                         min-height: 1.2rem;
                         font-size: 0.625rem;
                     }
                     
                     .time-label {
-                        min-width: 45px;
                         min-height: 1rem;
                         font-size: 0.5rem;
                     }
                     
                     .time-slot {
-                        min-width: 35px;
                         min-height: 1rem;
                     }
                 }

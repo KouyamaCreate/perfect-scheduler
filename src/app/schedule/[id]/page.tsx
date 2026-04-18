@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
+import { toBlob } from 'html-to-image';
 import Link from 'next/link';
 import { useParams, useSearchParams, useRouter } from 'next/navigation';
 import { doc, getDoc, collection, setDoc, onSnapshot, query, orderBy } from 'firebase/firestore';
@@ -11,6 +12,7 @@ import { getUserDisplayName } from '@/lib/auth';
 import { AppHeader } from '@/components/AppHeader';
 
 type SelectionPoint = { dateIndex: number, timeIndex: number };
+type CalendarViewMode = 'scroll' | 'fit';
 
 export default function SchedulePage() {
     const params = useParams();
@@ -48,6 +50,13 @@ export default function SchedulePage() {
     // カラーカスタマイズ用の状態
     const [minColor, setMinColor] = useState('#dce8ff'); // 少ない時の色（淡い青）
     const [maxColor, setMaxColor] = useState('#73a5ff'); // 多い時の色（濃い青）
+    const [calendarViewMode, setCalendarViewMode] = useState<CalendarViewMode>('scroll');
+    const [fitScale, setFitScale] = useState(1);
+    const [fitViewportHeight, setFitViewportHeight] = useState<number | null>(null);
+    const [fitContentSize, setFitContentSize] = useState({ width: 0, height: 0 });
+    const [isCalendarFullscreen, setIsCalendarFullscreen] = useState(false);
+    const [copyingCalendarImage, setCopyingCalendarImage] = useState(false);
+    const [calendarImageCopied, setCalendarImageCopied] = useState(false);
 
     // 選択モード（デフォルトはWhen2Meetと同じく範囲選択）
     const [selectionType, setSelectionType] = useState<'path' | 'area'>('area');
@@ -64,6 +73,9 @@ export default function SchedulePage() {
     const activeTouchIdRef = useRef<number | null>(null);
     const touchAbortControllerRef = useRef<AbortController | null>(null);
     const calendarContainerRef = useRef<HTMLDivElement | null>(null);
+    const calendarPanelRef = useRef<HTMLDivElement | null>(null);
+    const calendarScaleWrapperRef = useRef<HTMLDivElement | null>(null);
+    const calendarGridRef = useRef<HTMLDivElement | null>(null);
     const touchClientPointRef = useRef<{ clientX: number; clientY: number } | null>(null);
     const autoScrollFrameRef = useRef<number | null>(null);
     const autoScrollVelocityRef = useRef({ x: 0, y: 0 });
@@ -219,12 +231,20 @@ export default function SchedulePage() {
         ? participants.find((participant) => participant.id === highlightedParticipantId) ?? null
         : null;
     const showResponses = !isEditMode;
+    const isFitCalendarView = showResponses && calendarViewMode === 'fit';
+    const calendarGridTemplateColumns = `var(--calendar-time-label-width) repeat(${dates.length}, var(--calendar-slot-width))`;
 
     useEffect(() => {
         if (highlightedParticipantId && !participants.some((participant) => participant.id === highlightedParticipantId)) {
             setHighlightedParticipantId(null);
         }
     }, [participants, highlightedParticipantId]);
+
+    useEffect(() => {
+        if (isEditMode && calendarViewMode !== 'scroll') {
+            setCalendarViewMode('scroll');
+        }
+    }, [calendarViewMode, isEditMode]);
 
     useEffect(() => {
         selectionStateRef.current = {
@@ -245,6 +265,77 @@ export default function SchedulePage() {
             document.body.classList.remove('touch-selection-lock');
         };
     }, []);
+
+    useEffect(() => {
+        const handleFullscreenChange = () => {
+            setIsCalendarFullscreen(document.fullscreenElement === calendarPanelRef.current);
+        };
+
+        document.addEventListener('fullscreenchange', handleFullscreenChange);
+        return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+    }, []);
+
+    useEffect(() => {
+        if (!isFitCalendarView) {
+            setFitScale(1);
+            setFitViewportHeight(null);
+            setFitContentSize({ width: 0, height: 0 });
+            return;
+        }
+
+        const updateFitScale = () => {
+            const container = calendarContainerRef.current;
+            const grid = calendarGridRef.current;
+            if (!container || !grid) {
+                return;
+            }
+
+            const naturalWidth = grid.scrollWidth;
+            const naturalHeight = grid.scrollHeight;
+            if (!naturalWidth || !naturalHeight) {
+                return;
+            }
+
+            setFitContentSize({
+                width: naturalWidth,
+                height: naturalHeight,
+            });
+
+            const horizontalPadding = 12;
+            const availableWidth = Math.max(container.clientWidth - horizontalPadding, 1);
+            const availableHeight = Math.max(
+                isCalendarFullscreen ? window.innerHeight - 220 : Math.min(window.innerHeight * 0.58, 680),
+                220
+            );
+            const widthScale = availableWidth / naturalWidth;
+            const heightScale = availableHeight / naturalHeight;
+            const nextScale = Math.min(1, widthScale, heightScale);
+
+            setFitScale(nextScale);
+            setFitViewportHeight(Math.max(Math.ceil(naturalHeight * nextScale), 220));
+        };
+
+        updateFitScale();
+
+        const resizeObserver = typeof ResizeObserver !== 'undefined'
+            ? new ResizeObserver(() => updateFitScale())
+            : null;
+
+        if (resizeObserver) {
+            if (calendarContainerRef.current) {
+                resizeObserver.observe(calendarContainerRef.current);
+            }
+            if (calendarGridRef.current) {
+                resizeObserver.observe(calendarGridRef.current);
+            }
+        }
+
+        window.addEventListener('resize', updateFitScale);
+        return () => {
+            resizeObserver?.disconnect();
+            window.removeEventListener('resize', updateFitScale);
+        };
+    }, [dates.length, isCalendarFullscreen, isFitCalendarView, timeSlots.length]);
 
     const getSlotId = (dateIndex: number, timeIndex: number) => `${dateIndex}-${timeIndex}`;
 
@@ -521,6 +612,67 @@ export default function SchedulePage() {
             active: false,
             lastMidpoint: null,
         };
+    };
+
+    const toggleCalendarFullscreen = async () => {
+        const panelElement = calendarPanelRef.current;
+        if (!panelElement) {
+            return;
+        }
+
+        try {
+            if (document.fullscreenElement === panelElement) {
+                await document.exitFullscreen();
+                return;
+            }
+
+            if (document.fullscreenElement) {
+                await document.exitFullscreen();
+            }
+
+            await panelElement.requestFullscreen();
+        } catch (error) {
+            console.error('Failed to toggle calendar fullscreen:', error);
+            alert('全画面表示の切り替えに失敗しました');
+        }
+    };
+
+    const copyCalendarToClipboard = async () => {
+        const gridElement = calendarGridRef.current;
+        if (!gridElement) {
+            return;
+        }
+
+        if (typeof ClipboardItem === 'undefined' || !navigator.clipboard?.write) {
+            alert('このブラウザでは画像のクリップボードコピーに対応していません');
+            return;
+        }
+
+        setCopyingCalendarImage(true);
+        try {
+            const blob = await toBlob(gridElement, {
+                backgroundColor: '#ffffff',
+                cacheBust: true,
+                pixelRatio: 2,
+            });
+
+            if (!blob) {
+                throw new Error('Failed to render calendar image');
+            }
+
+            await navigator.clipboard.write([
+                new ClipboardItem({
+                    [blob.type]: blob,
+                }),
+            ]);
+            setCalendarImageCopied(true);
+            window.setTimeout(() => setCalendarImageCopied(false), 2000);
+        } catch (error) {
+            console.error('Failed to copy calendar image:', error);
+            alert('表の画像コピーに失敗しました');
+        } finally {
+            setCopyingCalendarImage(false);
+        }
     };
 
     // 参加者を追加する
@@ -826,64 +978,145 @@ export default function SchedulePage() {
 
                 <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
                     <div className="md:col-span-2">
-                        <div className="mb-4 flex flex-col gap-4">
+                        <div
+                            ref={calendarPanelRef}
+                            className={`calendar-panel-shell mb-4 flex flex-col gap-4 ${isCalendarFullscreen ? 'is-calendar-fullscreen' : ''}`}
+                        >
                             <div className="flex justify-between items-center">
                                 <h2 className="text-xl font-bold text-[var(--foreground)]">候補時間を選択</h2>
                             </div>
                             
-                            <div className="grid grid-cols-2 gap-3 md:flex md:items-center">
-                                <label className={`flex cursor-pointer items-center gap-2 rounded-full border px-3 py-2 ${
-                                    selectionType === 'area'
-                                        ? 'border-[#aac8ff] bg-[var(--primary-soft)]'
-                                        : 'border-[var(--border)] bg-white'
-                                }`}>
-                                    <input
-                                        type="radio"
-                                        id="areaMode"
-                                        name="selectionMode"
-                                        value="area"
-                                        checked={selectionType === 'area'}
-                                        onChange={() => setSelectionType('area')}
-                                        className="accent-[var(--primary)]"
-                                    />
-                                    <span className="text-sm font-medium text-[var(--foreground)]">範囲選択</span>
-                                </label>
-                                <label className={`flex cursor-pointer items-center gap-2 rounded-full border px-3 py-2 ${
-                                    selectionType === 'path'
-                                        ? 'border-[#aac8ff] bg-[var(--primary-soft)]'
-                                        : 'border-[var(--border)] bg-white'
-                                }`}>
-                                    <input
-                                        type="radio"
-                                        id="pathMode"
-                                        name="selectionMode"
-                                        value="path"
-                                        checked={selectionType === 'path'}
-                                        onChange={() => setSelectionType('path')}
-                                        className="accent-[var(--primary)]"
-                                    />
-                                    <span className="text-sm font-medium text-[var(--foreground)]">なぞり選択</span>
-                                </label>
-                            </div>
+                            {isEditMode ? (
+                                <div className="grid grid-cols-2 gap-3 md:flex md:items-center">
+                                    <label className={`flex cursor-pointer items-center gap-2 rounded-full border px-3 py-2 ${
+                                        selectionType === 'area'
+                                            ? 'border-[#aac8ff] bg-[var(--primary-soft)]'
+                                            : 'border-[var(--border)] bg-white'
+                                    }`}>
+                                        <input
+                                            type="radio"
+                                            id="areaMode"
+                                            name="selectionMode"
+                                            value="area"
+                                            checked={selectionType === 'area'}
+                                            onChange={() => setSelectionType('area')}
+                                            className="accent-[var(--primary)]"
+                                        />
+                                        <span className="text-sm font-medium text-[var(--foreground)]">範囲選択</span>
+                                    </label>
+                                    <label className={`flex cursor-pointer items-center gap-2 rounded-full border px-3 py-2 ${
+                                        selectionType === 'path'
+                                            ? 'border-[#aac8ff] bg-[var(--primary-soft)]'
+                                            : 'border-[var(--border)] bg-white'
+                                    }`}>
+                                        <input
+                                            type="radio"
+                                            id="pathMode"
+                                            name="selectionMode"
+                                            value="path"
+                                            checked={selectionType === 'path'}
+                                            onChange={() => setSelectionType('path')}
+                                            className="accent-[var(--primary)]"
+                                        />
+                                        <span className="text-sm font-medium text-[var(--foreground)]">なぞり選択</span>
+                                    </label>
+                                </div>
+                            ) : (
+                                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                                    <div className="grid grid-cols-2 gap-3 md:flex md:items-center">
+                                        <label className={`flex cursor-pointer items-center gap-2 rounded-full border px-3 py-2 ${
+                                            calendarViewMode === 'scroll'
+                                                ? 'border-[#aac8ff] bg-[var(--primary-soft)]'
+                                                : 'border-[var(--border)] bg-white'
+                                        }`}>
+                                            <input
+                                                type="radio"
+                                                id="calendarScrollViewMode"
+                                                name="calendarViewMode"
+                                                value="scroll"
+                                                checked={calendarViewMode === 'scroll'}
+                                                onChange={() => setCalendarViewMode('scroll')}
+                                                className="accent-[var(--primary)]"
+                                            />
+                                            <span className="text-sm font-medium text-[var(--foreground)]">通常表示</span>
+                                        </label>
+                                        <label className={`flex cursor-pointer items-center gap-2 rounded-full border px-3 py-2 ${
+                                            calendarViewMode === 'fit'
+                                                ? 'border-[#aac8ff] bg-[var(--primary-soft)]'
+                                                : 'border-[var(--border)] bg-white'
+                                        }`}>
+                                            <input
+                                                type="radio"
+                                                id="calendarFitViewMode"
+                                                name="calendarViewMode"
+                                                value="fit"
+                                                checked={calendarViewMode === 'fit'}
+                                                onChange={() => setCalendarViewMode('fit')}
+                                                className="accent-[var(--primary)]"
+                                            />
+                                            <span className="text-sm font-medium text-[var(--foreground)]">全体表示</span>
+                                        </label>
+                                    </div>
+                                    <div className="flex flex-wrap gap-2">
+                                        <button
+                                            type="button"
+                                            className="btn btn-secondary"
+                                            onClick={toggleCalendarFullscreen}
+                                        >
+                                            {isCalendarFullscreen ? '全画面を終了' : '表を全画面表示'}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            className="btn btn-secondary"
+                                            onClick={copyCalendarToClipboard}
+                                            disabled={copyingCalendarImage}
+                                        >
+                                            {copyingCalendarImage
+                                                ? '画像を生成中...'
+                                                : calendarImageCopied
+                                                    ? '画像をコピー済み'
+                                                    : '表を画像コピー'}
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
                             
                             <div className="md:hidden rounded-xl bg-[var(--secondary)] px-4 py-3 text-sm text-[var(--foreground-muted)]">
-                                マスはタップ/ドラッグでそのまま選択でき、端まで引くと自動でスクロールします。移動したい時は上の日付帯・左の時刻帯、または表の上で2本指スクロールを使ってください。
+                                {isEditMode
+                                    ? 'マスはタップ/ドラッグでそのまま選択でき、端まで引くと自動でスクロールします。移動したい時は上の日付帯・左の時刻帯、または表の上で2本指スクロールを使ってください。'
+                                    : '通常表示と全体表示を切り替えられます。必要に応じて全画面表示や画像コピーも使ってください。'}
                             </div>
                         </div>
 
-                        <div className="surface-card mb-4 p-3 md:p-4">
+                        <div className={`surface-card mb-4 p-3 md:p-4 ${isFitCalendarView ? 'calendar-surface-fit' : ''}`}>
                         <div
                             ref={calendarContainerRef}
-                            className={`calendar-container ${isTouchSelecting ? 'touch-selecting' : ''}`}
+                            className={`calendar-container ${isTouchSelecting ? 'touch-selecting' : ''} ${isFitCalendarView ? 'calendar-container-fit' : ''}`}
                             onTouchStart={handleCalendarTouchStart}
                             onTouchMove={handleCalendarTouchMove}
                             onTouchEnd={handleCalendarTouchEnd}
                             onTouchCancel={handleCalendarTouchEnd}
+                            style={isFitCalendarView && fitViewportHeight ? { maxHeight: fitViewportHeight } : undefined}
                         >
                             <div
+                                ref={calendarScaleWrapperRef}
+                                className={`calendar-scale-wrapper ${isFitCalendarView ? 'is-fit' : ''}`}
+                                style={isFitCalendarView && fitContentSize.width > 0 && fitContentSize.height > 0
+                                    ? {
+                                        width: fitContentSize.width * fitScale,
+                                        height: fitContentSize.height * fitScale,
+                                    }
+                                    : undefined}
+                            >
+                            <div
+                                className={`calendar-scale-inner ${isFitCalendarView ? 'is-fit' : ''}`}
+                                style={isFitCalendarView ? { transform: `scale(${fitScale})` } : undefined}
+                            >
+                            <div
+                                ref={calendarGridRef}
                                 className="calendar-grid"
                                 style={{
-                                    gridTemplateColumns: `auto ${dates.map(() => '1fr').join(' ')}`,
+                                    gridTemplateColumns: calendarGridTemplateColumns,
                                     overflow: 'visible',
                                 }}
                             >
@@ -1002,6 +1235,8 @@ export default function SchedulePage() {
                                     })}
                                 </React.Fragment>
                             ))}
+                            </div>
+                            </div>
                             </div>
                         </div>
                         </div>
@@ -1202,7 +1437,14 @@ export default function SchedulePage() {
             </footer>
 
             <style jsx>{`
+                .calendar-panel-shell.is-calendar-fullscreen {
+                    background: #ffffff;
+                    padding: 1rem;
+                }
+
                 .calendar-container {
+                    --calendar-slot-width: 40px;
+                    --calendar-time-label-width: 50px;
                     overflow: auto;
                     max-height: 70vh;
                     max-width: 100%;
@@ -1213,6 +1455,31 @@ export default function SchedulePage() {
                     overscroll-behavior: contain;
                     -webkit-overflow-scrolling: touch;
                     isolation: isolate;
+                }
+
+                .calendar-container.calendar-container-fit {
+                    overflow: auto;
+                    display: flex;
+                    justify-content: center;
+                    align-items: flex-start;
+                }
+
+                .calendar-scale-wrapper {
+                    width: max-content;
+                    min-width: max-content;
+                }
+
+                .calendar-scale-wrapper.is-fit {
+                    overflow: hidden;
+                }
+
+                .calendar-scale-inner {
+                    width: max-content;
+                    transform-origin: top left;
+                }
+
+                .calendar-surface-fit {
+                    overflow: hidden;
                 }
 
                 .calendar-container.touch-selecting {
@@ -1247,14 +1514,15 @@ export default function SchedulePage() {
                 
                 .calendar-grid {
                     display: grid;
-                    min-width: max-content;
+                    width: max-content;
                     overflow: visible;
                 }
                 
                 /* 固定ヘッダー */
                 .time-header {
                     min-height: 1.5rem;
-                    min-width: 50px;
+                    width: var(--calendar-time-label-width);
+                    min-width: var(--calendar-time-label-width);
                     padding: 0.25rem;
                     font-size: 0.75rem;
                     display: flex;
@@ -1267,7 +1535,8 @@ export default function SchedulePage() {
                 
                 .date-header {
                     min-height: 1.5rem;
-                    min-width: 40px;
+                    width: var(--calendar-slot-width);
+                    min-width: var(--calendar-slot-width);
                     padding: 0.25rem;
                     font-size: 0.75rem;
                     display: flex;
@@ -1281,7 +1550,8 @@ export default function SchedulePage() {
                 
                 .time-label {
                     min-height: 1.2rem;
-                    min-width: 50px;
+                    width: var(--calendar-time-label-width);
+                    min-width: var(--calendar-time-label-width);
                     padding: 0.125rem 0.25rem;
                     font-size: 0.625rem;
                     display: flex;
@@ -1295,7 +1565,8 @@ export default function SchedulePage() {
                 
                 .time-slot {
                     min-height: 1.2rem;
-                    min-width: 40px;
+                    width: var(--calendar-slot-width);
+                    min-width: var(--calendar-slot-width);
                     cursor: pointer;
                     transition: background-color 0.1s;
                     position: relative;
@@ -1332,28 +1603,26 @@ export default function SchedulePage() {
                 /* モバイルデバイス用の調整 */
                 @media (max-width: 768px) {
                     .calendar-container {
+                        --calendar-slot-width: 35px;
+                        --calendar-time-label-width: 45px;
                         max-height: 60vh;
                     }
                     
                     .time-header {
-                        min-width: 45px;
                         min-height: 1.2rem;
                     }
                     
                     .date-header {
-                        min-width: 35px;
                         min-height: 1.2rem;
                         font-size: 0.625rem;
                     }
                     
                     .time-label {
-                        min-width: 45px;
                         min-height: 1rem;
                         font-size: 0.5rem;
                     }
                     
                     .time-slot {
-                        min-width: 35px;
                         min-height: 1rem;
                     }
                 }
@@ -1361,6 +1630,16 @@ export default function SchedulePage() {
                 :global(body.touch-selection-lock) {
                     overflow: hidden;
                     overscroll-behavior: none;
+                }
+
+                :global(.calendar-panel-shell:fullscreen) {
+                    background: #ffffff;
+                    padding: 1rem;
+                    overflow: auto;
+                }
+
+                :global(.calendar-panel-shell:fullscreen .calendar-container) {
+                    max-height: calc(100vh - 210px);
                 }
             `}</style>
             

@@ -226,6 +226,80 @@ describe('SchedulePage', () => {
         });
     });
 
+    test('タッチ操作でも単一セルを選択できること', async () => {
+        const { container } = render(<SchedulePage />);
+
+        await waitForScheduleToLoad();
+
+        const firstCell = getCell(container, 0, 0);
+
+        fireEvent.touchStart(firstCell, {
+            touches: [{ identifier: 11, clientX: 40, clientY: 40 }],
+            changedTouches: [{ identifier: 11, clientX: 40, clientY: 40 }],
+        });
+        fireEvent.touchEnd(window, {
+            touches: [],
+            changedTouches: [{ identifier: 11, clientX: 40, clientY: 40 }],
+        });
+
+        await waitFor(() => {
+            expect(firstCell).toHaveClass('selected');
+            expect(screen.getByText(/選択済み時間枠:\s*1/)).toBeInTheDocument();
+        });
+    });
+
+    test('タッチのなぞり選択でも複数セルを選択できること', async () => {
+        const { container } = render(<SchedulePage />);
+
+        await waitForScheduleToLoad();
+
+        fireEvent.click(screen.getByLabelText('なぞり選択'));
+
+        const firstCell = getCell(container, 0, 0);
+        const secondCell = getCell(container, 1, 0);
+        const originalElementFromPoint = (document as Document & {
+            elementFromPoint?: (x: number, y: number) => Element | null;
+        }).elementFromPoint;
+        Object.defineProperty(document, 'elementFromPoint', {
+            configurable: true,
+            writable: true,
+            value: jest.fn(() => secondCell),
+        });
+
+        fireEvent.touchStart(firstCell, {
+            touches: [{ identifier: 21, clientX: 40, clientY: 40 }],
+            changedTouches: [{ identifier: 21, clientX: 40, clientY: 40 }],
+        });
+        fireEvent.touchMove(window, {
+            touches: [{ identifier: 21, clientX: 88, clientY: 40 }],
+            changedTouches: [{ identifier: 21, clientX: 88, clientY: 40 }],
+        });
+
+        await waitFor(() => {
+            expect(firstCell).toHaveClass('selected');
+            expect(secondCell).toHaveClass('selected');
+        });
+
+        fireEvent.touchEnd(window, {
+            touches: [],
+            changedTouches: [{ identifier: 21, clientX: 88, clientY: 40 }],
+        });
+
+        if (originalElementFromPoint) {
+            Object.defineProperty(document, 'elementFromPoint', {
+                configurable: true,
+                writable: true,
+                value: originalElementFromPoint,
+            });
+        } else {
+            delete (document as Document & { elementFromPoint?: (x: number, y: number) => Element | null; }).elementFromPoint;
+        }
+
+        await waitFor(() => {
+            expect(screen.getByText(/選択済み時間枠:\s*2/)).toBeInTheDocument();
+        });
+    });
+
     test('範囲選択は開始マスが未選択なら範囲全体を追加すること', async () => {
         const { container } = render(<SchedulePage />);
 

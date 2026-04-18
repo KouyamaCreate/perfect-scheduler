@@ -52,11 +52,6 @@ export default function SchedulePage() {
     // 選択モード（デフォルトはWhen2Meetと同じく範囲選択）
     const [selectionType, setSelectionType] = useState<'path' | 'area'>('area');
     
-    // 長押し関連のstate
-    const [longPressTimer, setLongPressTimer] = useState<NodeJS.Timeout | null>(null);
-    const [isLongPressing, setIsLongPressing] = useState(false);
-    const [longPressStarted, setLongPressStarted] = useState(false);
-
     // 選択操作のための状態変数
     const [isSelecting, setIsSelecting] = useState(false);
     const [selectionStartPoint, setSelectionStartPoint] = useState<SelectionPoint | null>(null);
@@ -64,15 +59,21 @@ export default function SchedulePage() {
     const [selectionBaseSlots, setSelectionBaseSlots] = useState<string[]>([]);
     const [isAdding, setIsAdding] = useState(true);
     const [dragStarted, setDragStarted] = useState(false);
+    const [touchActiveCell, setTouchActiveCell] = useState<SelectionPoint | null>(null);
+    const [isTouchSelecting, setIsTouchSelecting] = useState(false);
+    const activeTouchIdRef = useRef<number | null>(null);
+    const touchAbortControllerRef = useRef<AbortController | null>(null);
     const selectionStateRef = useRef<{
         isSelecting: boolean;
         dragStarted: boolean;
         selectionStartPoint: SelectionPoint | null;
+        selectionCurrentPoint: SelectionPoint | null;
         selectionType: 'path' | 'area';
     }>({
         isSelecting: false,
         dragStarted: false,
         selectionStartPoint: null,
+        selectionCurrentPoint: null,
         selectionType: 'area'
     });
 
@@ -219,11 +220,41 @@ export default function SchedulePage() {
             isSelecting,
             dragStarted,
             selectionStartPoint,
+            selectionCurrentPoint,
             selectionType
         };
-    }, [isSelecting, dragStarted, selectionStartPoint, selectionType]);
+    }, [isSelecting, dragStarted, selectionStartPoint, selectionCurrentPoint, selectionType]);
+
+    useEffect(() => {
+        return () => {
+            touchAbortControllerRef.current?.abort();
+            document.body.classList.remove('touch-selection-lock');
+        };
+    }, []);
 
     const getSlotId = (dateIndex: number, timeIndex: number) => `${dateIndex}-${timeIndex}`;
+
+    const findSlotPointFromElement = (element: Element | null): SelectionPoint | null => {
+        const slotElement = element instanceof Element
+            ? element.closest<HTMLElement>('[data-slot-cell="true"]')
+            : null;
+
+        if (!slotElement) {
+            return null;
+        }
+
+        const dateIndex = slotElement.getAttribute('data-date-index');
+        const timeIndex = slotElement.getAttribute('data-time-index');
+
+        if (dateIndex === null || timeIndex === null) {
+            return null;
+        }
+
+        return {
+            dateIndex: parseInt(dateIndex, 10),
+            timeIndex: parseInt(timeIndex, 10),
+        };
+    };
 
     const getAreaSlotIds = (startPoint: SelectionPoint, endPoint: SelectionPoint) => {
         const startDateIndex = Math.min(startPoint.dateIndex, endPoint.dateIndex);
@@ -257,6 +288,51 @@ export default function SchedulePage() {
         }
 
         return baseSlots.filter(slotId => !areaSlotIdSet.has(slotId));
+    };
+
+    const beginSelection = (dateIndex: number, timeIndex: number) => {
+        const slotId = getSlotId(dateIndex, timeIndex);
+        const isSelected = selectedSlots.includes(slotId);
+
+        setIsAdding(!isSelected);
+        setSelectionBaseSlots(selectedSlots);
+        setSelectionStartPoint({ dateIndex, timeIndex });
+        setSelectionCurrentPoint({ dateIndex, timeIndex });
+        setIsSelecting(true);
+        setDragStarted(false);
+
+        if (selectionType === 'path') {
+            toggleCellSelection(dateIndex, timeIndex);
+        }
+    };
+
+    const clearTouchInteraction = () => {
+        touchAbortControllerRef.current?.abort();
+        touchAbortControllerRef.current = null;
+        activeTouchIdRef.current = null;
+        setTouchActiveCell(null);
+        setIsTouchSelecting(false);
+        document.body.classList.remove('touch-selection-lock');
+    };
+
+    const finishSelection = (shouldApplySingleCellToggle = true) => {
+        const {
+            isSelecting: selectingNow,
+            dragStarted: dragStartedNow,
+            selectionStartPoint: startPoint,
+            selectionType: currentSelectionType,
+        } = selectionStateRef.current;
+
+        if (shouldApplySingleCellToggle && selectingNow && !dragStartedNow && startPoint && currentSelectionType === 'area') {
+            const { dateIndex, timeIndex } = startPoint;
+            toggleCellSelection(dateIndex, timeIndex);
+        }
+
+        setIsSelecting(false);
+        setSelectionStartPoint(null);
+        setSelectionCurrentPoint(null);
+        setSelectionBaseSlots([]);
+        clearTouchInteraction();
     };
 
     // 参加者を追加する
@@ -305,26 +381,7 @@ export default function SchedulePage() {
     const handleCellMouseDown = (dateIndex: number, timeIndex: number, e: React.MouseEvent) => {
         if (!isEditMode) return; // 一覧ページでは編集不可
         e.preventDefault();
-
-        const slotId = getSlotId(dateIndex, timeIndex);
-        const isSelected = selectedSlots.includes(slotId);
-
-        // 追加モード or 削除モードを決定
-        setIsAdding(!isSelected);
-
-        // 選択操作の開始ポイントを記録
-        setSelectionBaseSlots(selectedSlots);
-        setSelectionStartPoint({ dateIndex, timeIndex });
-        setSelectionCurrentPoint({ dateIndex, timeIndex });
-
-        // 選択中状態に設定
-        setIsSelecting(true);
-        setDragStarted(false);
-
-        // 単一セル選択の場合はここですぐに選択状態を変更
-        if (selectionType === 'path') {
-            toggleCellSelection(dateIndex, timeIndex);
-        }
+        beginSelection(dateIndex, timeIndex);
 
         // マウスアップイベントをwindowに設定
         window.addEventListener('mouseup', handleMouseUp);
@@ -343,135 +400,27 @@ export default function SchedulePage() {
         setSelectionCurrentPoint({ dateIndex, timeIndex });
     };
 
-    // タッチイベント用state
-    const [touchActiveCell, setTouchActiveCell] = useState<SelectionPoint | null>(null);
-
     // タッチ開始時
     const handleCellTouchStart = (dateIndex: number, timeIndex: number, e: React.TouchEvent) => {
         if (!isEditMode) return; // 一覧ページでは編集不可
-        // シングルタッチのみ処理
         if (e.touches.length !== 1) return;
-        
-        // PCでは従来通りの処理
-        if (window.innerWidth > 768) {
-            e.preventDefault();
-            const slotId = getSlotId(dateIndex, timeIndex);
-            const isSelected = selectedSlots.includes(slotId);
-
-            setIsAdding(!isSelected);
-            setSelectionBaseSlots(selectedSlots);
-            setSelectionStartPoint({ dateIndex, timeIndex });
-            setSelectionCurrentPoint({ dateIndex, timeIndex });
-            setIsSelecting(true);
-            setDragStarted(false);
-
-            if (selectionType === 'path') {
-                toggleCellSelection(dateIndex, timeIndex);
-            }
-
-            setTouchActiveCell({ dateIndex, timeIndex });
-            return;
-        }
-        
-        // スマホでは長押しタイマーを開始
-        const timer = setTimeout(() => {
-            // 長押し検出時の処理
-            e.preventDefault();
-            setIsLongPressing(true);
-            setLongPressStarted(true);
-            
-            const slotId = getSlotId(dateIndex, timeIndex);
-            const isSelected = selectedSlots.includes(slotId);
-
-            setIsAdding(!isSelected);
-            setSelectionBaseSlots(selectedSlots);
-            setSelectionStartPoint({ dateIndex, timeIndex });
-            setSelectionCurrentPoint({ dateIndex, timeIndex });
-            setIsSelecting(true);
-            setDragStarted(false);
-
-            if (selectionType === 'path') {
-                toggleCellSelection(dateIndex, timeIndex);
-            }
-
-            setTouchActiveCell({ dateIndex, timeIndex });
-            
-            // バイブレーションでフィードバック
-            if (navigator.vibrate) {
-                navigator.vibrate(50);
-            }
-        }, 300); // 300msで長押しと判定
-        
-        setLongPressTimer(timer);
-    };
-
-    // タッチ移動時
-    const handleCellTouchMove = (e: React.TouchEvent) => {
-        // スマホで長押しタイマーをキャンセル（移動したら長押しではない）
-        if (window.innerWidth <= 768 && longPressTimer && !longPressStarted) {
-            clearTimeout(longPressTimer);
-            setLongPressTimer(null);
-        }
-        
-        // PCか長押し開始後のみ選択処理
-        if (window.innerWidth <= 768 && !isLongPressing) {
-            return;
-        }
-        
-        if (!isSelecting || e.touches.length !== 1) return;
-        
-        // 選択中はスクロールを禁止
         e.preventDefault();
-        
         const touch = e.touches[0];
         if (!touch) return;
-        
-        // タッチ座標から該当するセルを特定
-        const element = document.elementFromPoint(touch.clientX, touch.clientY);
-        if (!element) return;
-        
-        const dateIndex = element.getAttribute('data-date-index');
-        const timeIndex = element.getAttribute('data-time-index');
-        
-        if (dateIndex !== null && timeIndex !== null) {
-            const parsedDateIndex = parseInt(dateIndex);
-            const parsedTimeIndex = parseInt(timeIndex);
-            
-            setDragStarted(true);
-            setSelectionCurrentPoint({ dateIndex: parsedDateIndex, timeIndex: parsedTimeIndex });
-            setTouchActiveCell({ dateIndex: parsedDateIndex, timeIndex: parsedTimeIndex });
-        }
-    };
 
-    // タッチ終了時
-    const handleCellTouchEnd = (e: React.TouchEvent) => {
-        // 長押しタイマーをクリア
-        if (longPressTimer) {
-            clearTimeout(longPressTimer);
-            setLongPressTimer(null);
-        }
-        
-        // スマホで長押しが開始されていない場合はスクロールを優先
-        if (window.innerWidth <= 768 && !isLongPressing) {
-            return;
-        }
-        
-        e.preventDefault();
-        
-        if (isSelecting) {
-            // ドラッグしていなかった場合は1マスだけの選択/解除
-            if (!dragStarted && selectionStartPoint && selectionType === 'area') {
-                const { dateIndex, timeIndex } = selectionStartPoint;
-                toggleCellSelection(dateIndex, timeIndex);
-            }
-        }
-        setIsSelecting(false);
-        setSelectionStartPoint(null);
-        setSelectionCurrentPoint(null);
-        setSelectionBaseSlots([]);
-        setTouchActiveCell(null);
-        setIsLongPressing(false);
-        setLongPressStarted(false);
+        clearTouchInteraction();
+        activeTouchIdRef.current = touch.identifier;
+        setIsTouchSelecting(true);
+        setTouchActiveCell({ dateIndex, timeIndex });
+        document.body.classList.add('touch-selection-lock');
+        beginSelection(dateIndex, timeIndex);
+
+        const controller = new AbortController();
+        touchAbortControllerRef.current = controller;
+
+        window.addEventListener('touchmove', handleGlobalTouchMove, { passive: false, signal: controller.signal });
+        window.addEventListener('touchend', handleGlobalTouchEnd, { passive: false, signal: controller.signal });
+        window.addEventListener('touchcancel', handleGlobalTouchCancel, { passive: false, signal: controller.signal });
     };
 
     // グローバルなマウス移動の検知（セル外でのドラッグにも対応）
@@ -482,26 +431,58 @@ export default function SchedulePage() {
         setDragStarted(true);
     };
 
+    const handleGlobalTouchMove = (e: TouchEvent) => {
+        const activeTouchId = activeTouchIdRef.current;
+        if (activeTouchId === null || !selectionStateRef.current.isSelecting) return;
+
+        const touch = Array.from(e.touches).find((currentTouch) => currentTouch.identifier === activeTouchId);
+        if (!touch) return;
+
+        const point = findSlotPointFromElement(document.elementFromPoint(touch.clientX, touch.clientY));
+        if (!point) return;
+
+        const currentPoint = selectionStateRef.current.selectionCurrentPoint;
+        if (currentPoint &&
+            currentPoint.dateIndex === point.dateIndex &&
+            currentPoint.timeIndex === point.timeIndex) {
+            return;
+        }
+
+        e.preventDefault();
+        setDragStarted(true);
+        setSelectionCurrentPoint(point);
+        setTouchActiveCell(point);
+    };
+
+    const handleGlobalTouchEnd = (e: TouchEvent) => {
+        const activeTouchId = activeTouchIdRef.current;
+        if (activeTouchId === null) return;
+
+        const isActiveTouchEnded = Array.from(e.changedTouches).some(
+            (currentTouch) => currentTouch.identifier === activeTouchId
+        );
+        if (!isActiveTouchEnded) return;
+
+        e.preventDefault();
+        finishSelection();
+    };
+
+    const handleGlobalTouchCancel = (e: TouchEvent) => {
+        const activeTouchId = activeTouchIdRef.current;
+        if (activeTouchId === null) return;
+
+        const isActiveTouchCanceled = Array.from(e.changedTouches).some(
+            (currentTouch) => currentTouch.identifier === activeTouchId
+        );
+        if (!isActiveTouchCanceled) return;
+
+        finishSelection(false);
+    };
+
     // マウスを離した時の処理
     const handleMouseUp = (e: MouseEvent) => {
         e.preventDefault();
-
-        const { isSelecting: selectingNow, dragStarted: dragStartedNow, selectionStartPoint: startPoint, selectionType: currentSelectionType } = selectionStateRef.current;
-
-        if (selectingNow) {
-            // ドラッグしていなかった場合は1マスだけの選択/解除
-            if (!dragStartedNow && startPoint && currentSelectionType === 'area') {
-                const { dateIndex, timeIndex } = startPoint;
-                toggleCellSelection(dateIndex, timeIndex);
-            }
-            // ドラッグしていた場合は範囲選択を確定（既に更新済みなので特に何もしない）
-        }
-
-        // 選択操作の終了
-        setIsSelecting(false);
-        setSelectionStartPoint(null);
-        setSelectionCurrentPoint(null);
-        setSelectionBaseSlots([]);
+        finishSelection();
 
         // イベントリスナーを削除
         window.removeEventListener('mouseup', handleMouseUp);
@@ -659,9 +640,12 @@ export default function SchedulePage() {
                                 <h2 className="text-xl font-bold text-[var(--foreground)]">候補時間を選択</h2>
                             </div>
                             
-                            <div className="hidden md:flex items-center gap-3">
-                                <div className="rounded-full border border-[#aac8ff] bg-[var(--primary-soft)] px-3 py-2">
-                                <div className="flex items-center gap-2">
+                            <div className="grid grid-cols-2 gap-3 md:flex md:items-center">
+                                <label className={`flex cursor-pointer items-center gap-2 rounded-full border px-3 py-2 ${
+                                    selectionType === 'area'
+                                        ? 'border-[#aac8ff] bg-[var(--primary-soft)]'
+                                        : 'border-[var(--border)] bg-white'
+                                }`}>
                                     <input
                                         type="radio"
                                         id="areaMode"
@@ -671,11 +655,13 @@ export default function SchedulePage() {
                                         onChange={() => setSelectionType('area')}
                                         className="accent-[var(--primary)]"
                                     />
-                                    <label htmlFor="areaMode" className="text-sm font-medium text-[var(--foreground)]">範囲選択</label>
-                                </div>
-                                </div>
-                                <div className="rounded-full border border-[var(--border)] bg-white px-3 py-2">
-                                <div className="flex items-center gap-2">
+                                    <span className="text-sm font-medium text-[var(--foreground)]">範囲選択</span>
+                                </label>
+                                <label className={`flex cursor-pointer items-center gap-2 rounded-full border px-3 py-2 ${
+                                    selectionType === 'path'
+                                        ? 'border-[#aac8ff] bg-[var(--primary-soft)]'
+                                        : 'border-[var(--border)] bg-white'
+                                }`}>
                                     <input
                                         type="radio"
                                         id="pathMode"
@@ -685,18 +671,17 @@ export default function SchedulePage() {
                                         onChange={() => setSelectionType('path')}
                                         className="accent-[var(--primary)]"
                                     />
-                                    <label htmlFor="pathMode" className="text-sm font-medium text-[var(--foreground)]">なぞり選択</label>
-                                </div>
-                                </div>
+                                    <span className="text-sm font-medium text-[var(--foreground)]">なぞり選択</span>
+                                </label>
                             </div>
                             
                             <div className="md:hidden rounded-xl bg-[var(--secondary)] px-4 py-3 text-sm text-[var(--foreground-muted)]">
-                                📱 スマホ: 長押しで予定選択、通常タップでスクロール
+                                マスはタップ/ドラッグでそのまま選択できます。スクロールしたい時は上の日付帯か左の時刻帯をドラッグしてください。
                             </div>
                         </div>
 
                         <div className="surface-card mb-4 p-3 md:p-4">
-                        <div className="calendar-container">
+                        <div className={`calendar-container ${isTouchSelecting ? 'touch-selecting' : ''}`}>
                             <div
                                 className="calendar-grid"
                                 style={{
@@ -780,13 +765,12 @@ export default function SchedulePage() {
                                                 onMouseDown={(e) => handleCellMouseDown(dateIndex, timeIndex, e)}
                                                 onMouseEnter={() => handleCellMouseEnter(dateIndex, timeIndex)}
                                                 onTouchStart={(e) => handleCellTouchStart(dateIndex, timeIndex, e)}
-                                                onTouchMove={handleCellTouchMove}
-                                                onTouchEnd={handleCellTouchEnd}
+                                                data-slot-cell="true"
                                                 data-date-index={dateIndex}
                                                 data-time-index={timeIndex}
                                                 style={{
                                                     userSelect: 'none',
-                                                    touchAction: 'manipulation',
+                                                    touchAction: isEditMode ? 'none' : 'manipulation',
                                                     WebkitTouchCallout: 'none',
                                                     WebkitUserSelect: 'none',
                                                     // 選択中のエレメントが必ず上に表示されるようにz-indexを設定
@@ -1017,6 +1001,12 @@ export default function SchedulePage() {
                     border-radius: 12px;
                     background: #ffffff;
                     position: relative;
+                    overscroll-behavior: contain;
+                    -webkit-overflow-scrolling: touch;
+                }
+
+                .calendar-container.touch-selecting {
+                    overscroll-behavior: none;
                 }
                 
                 /* スクロールバーのスタイル調整 */
@@ -1060,6 +1050,7 @@ export default function SchedulePage() {
                     align-items: center;
                     justify-content: center;
                     color: var(--foreground-muted);
+                    touch-action: auto;
                 }
                 
                 .date-header {
@@ -1072,6 +1063,7 @@ export default function SchedulePage() {
                     justify-content: center;
                     background: #f8fbff;
                     color: var(--primary-strong);
+                    touch-action: pan-x;
                 }
                 
                 .time-label {
@@ -1084,6 +1076,7 @@ export default function SchedulePage() {
                     justify-content: center;
                     background: #f8fbff;
                     color: var(--foreground-muted);
+                    touch-action: pan-y;
                 }
                 
                 .time-slot {
@@ -1093,6 +1086,7 @@ export default function SchedulePage() {
                     transition: background-color 0.1s;
                     position: relative;
                     border: 0.5px solid #e7edf8;
+                    touch-action: none;
                 }
                 
                 .time-slot.selected {
@@ -1148,6 +1142,11 @@ export default function SchedulePage() {
                         min-width: 35px;
                         min-height: 1rem;
                     }
+                }
+
+                :global(body.touch-selection-lock) {
+                    overflow: hidden;
+                    overscroll-behavior: none;
                 }
             `}</style>
             

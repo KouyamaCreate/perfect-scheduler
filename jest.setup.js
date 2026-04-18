@@ -15,15 +15,14 @@ jest.mock('firebase/firestore', () => {
         getFirestore: jest.fn().mockReturnValue({
             type: 'firestore',
         }),
-        doc: jest.fn().mockImplementation((db, collection, id) => ({
-            id,
-            collection,
-            path: `${collection}/${id}`,
+        doc: jest.fn().mockImplementation((_db, ...segments) => ({
+            id: segments[segments.length - 1],
+            path: segments.join('/'),
         })),
-        collection: jest.fn().mockImplementation((db, path) => ({
-            path,
+        collection: jest.fn().mockImplementation((_db, ...segments) => ({
+            path: segments.join('/'),
         })),
-        collectionGroup: jest.fn().mockImplementation((db, path) => ({
+        collectionGroup: jest.fn().mockImplementation((_db, path) => ({
             path,
         })),
         getDoc: jest.fn().mockImplementation(() =>
@@ -37,7 +36,9 @@ jest.mock('firebase/firestore', () => {
                     startTime: '09:00',
                     endTime: '17:00',
                     duration: 30,
-                    createdAt: new Date(),
+                    createdAt: {
+                        toDate: () => new Date(),
+                    },
                 }),
             })
         ),

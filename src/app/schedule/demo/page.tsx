@@ -1,13 +1,13 @@
 'use client';
 
-import React, { useState, useEffect, Suspense } from 'react';
-// import Link from 'next/link';
-// import Image from 'next/image';
+import React, { useState, useEffect, useRef, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { LoginModal } from '@/components/LoginModal';
 import { getUserDisplayName } from '@/lib/auth';
 import { AppHeader } from '@/components/AppHeader';
+
+type SelectionPoint = { dateIndex: number, timeIndex: number };
 
 // URLパラメータを取得するコンポーネント
 function ScheduleDemoContent() {
@@ -47,10 +47,22 @@ function ScheduleDemoContent() {
 
     // 選択操作のための状態変数
     const [isSelecting, setIsSelecting] = useState(false);
-    const [selectionStartPoint, setSelectionStartPoint] = useState<{ dateIndex: number, timeIndex: number } | null>(null);
-    const [selectionCurrentPoint, setSelectionCurrentPoint] = useState<{ dateIndex: number, timeIndex: number } | null>(null);
+    const [selectionStartPoint, setSelectionStartPoint] = useState<SelectionPoint | null>(null);
+    const [selectionCurrentPoint, setSelectionCurrentPoint] = useState<SelectionPoint | null>(null);
+    const [selectionBaseSlots, setSelectionBaseSlots] = useState<string[]>([]);
     const [isAdding, setIsAdding] = useState(true);
     const [dragStarted, setDragStarted] = useState(false);
+    const selectionStateRef = useRef<{
+        isSelecting: boolean;
+        dragStarted: boolean;
+        selectionStartPoint: SelectionPoint | null;
+        selectionType: 'path' | 'area';
+    }>({
+        isSelecting: false,
+        dragStarted: false,
+        selectionStartPoint: null,
+        selectionType: 'area'
+    });
 
     // 日付と時間スロットの配列を生成
     const dates = getDatesInRange(startDate, endDate);
@@ -92,6 +104,47 @@ function ScheduleDemoContent() {
         }
     }, [user, username, participants, slotsInitialized, selectedSlots.length]);
 
+    useEffect(() => {
+        selectionStateRef.current = {
+            isSelecting,
+            dragStarted,
+            selectionStartPoint,
+            selectionType
+        };
+    }, [isSelecting, dragStarted, selectionStartPoint, selectionType]);
+
+    const getSlotId = (dateIndex: number, timeIndex: number) => `${dateIndex}-${timeIndex}`;
+
+    const getAreaSlotIds = (startPoint: SelectionPoint, endPoint: SelectionPoint) => {
+        const startDateIndex = Math.min(startPoint.dateIndex, endPoint.dateIndex);
+        const endDateIndex = Math.max(startPoint.dateIndex, endPoint.dateIndex);
+        const startTimeIndex = Math.min(startPoint.timeIndex, endPoint.timeIndex);
+        const endTimeIndex = Math.max(startPoint.timeIndex, endPoint.timeIndex);
+        const slotIds: string[] = [];
+
+        for (let dateIndex = startDateIndex; dateIndex <= endDateIndex; dateIndex += 1) {
+            for (let timeIndex = startTimeIndex; timeIndex <= endTimeIndex; timeIndex += 1) {
+                slotIds.push(getSlotId(dateIndex, timeIndex));
+            }
+        }
+
+        return slotIds;
+    };
+
+    const toggleSlotsFromBaseSelection = (baseSlots: string[], toggledSlotIds: string[]) => {
+        const toggledSlotIdSet = new Set(toggledSlotIds);
+        const nextSelectedSlots = baseSlots.filter(slotId => !toggledSlotIdSet.has(slotId));
+        const baseSlotIdSet = new Set(baseSlots);
+
+        toggledSlotIds.forEach(slotId => {
+            if (!baseSlotIdSet.has(slotId)) {
+                nextSelectedSlots.push(slotId);
+            }
+        });
+
+        return nextSelectedSlots;
+    };
+
     // 参加者を追加する
     const handleAddParticipant = (e: React.FormEvent) => {
         e.preventDefault();
@@ -123,13 +176,14 @@ function ScheduleDemoContent() {
     const handleCellMouseDown = (dateIndex: number, timeIndex: number, e: React.MouseEvent) => {
         e.preventDefault();
 
-        const slotId = `${dateIndex}-${timeIndex}`;
+        const slotId = getSlotId(dateIndex, timeIndex);
         const isSelected = selectedSlots.includes(slotId);
 
         // 追加モード or 削除モードを決定
         setIsAdding(!isSelected);
 
         // 選択操作の開始ポイントを記録
+        setSelectionBaseSlots(selectedSlots);
         setSelectionStartPoint({ dateIndex, timeIndex });
         setSelectionCurrentPoint({ dateIndex, timeIndex });
 
@@ -159,7 +213,7 @@ function ScheduleDemoContent() {
     };
 
     // タッチイベント用state
-    const [touchActiveCell, setTouchActiveCell] = useState<{ dateIndex: number, timeIndex: number } | null>(null);
+    const [touchActiveCell, setTouchActiveCell] = useState<SelectionPoint | null>(null);
 
     // タッチ開始時
     const handleCellTouchStart = (dateIndex: number, timeIndex: number, e: React.TouchEvent) => {
@@ -169,10 +223,11 @@ function ScheduleDemoContent() {
         // PCでは従来通りの処理
         if (window.innerWidth > 768) {
             e.preventDefault();
-            const slotId = `${dateIndex}-${timeIndex}`;
+            const slotId = getSlotId(dateIndex, timeIndex);
             const isSelected = selectedSlots.includes(slotId);
 
             setIsAdding(!isSelected);
+            setSelectionBaseSlots(selectedSlots);
             setSelectionStartPoint({ dateIndex, timeIndex });
             setSelectionCurrentPoint({ dateIndex, timeIndex });
             setIsSelecting(true);
@@ -193,10 +248,11 @@ function ScheduleDemoContent() {
             setIsLongPressing(true);
             setLongPressStarted(true);
             
-            const slotId = `${dateIndex}-${timeIndex}`;
+            const slotId = getSlotId(dateIndex, timeIndex);
             const isSelected = selectedSlots.includes(slotId);
 
             setIsAdding(!isSelected);
+            setSelectionBaseSlots(selectedSlots);
             setSelectionStartPoint({ dateIndex, timeIndex });
             setSelectionCurrentPoint({ dateIndex, timeIndex });
             setIsSelecting(true);
@@ -272,16 +328,15 @@ function ScheduleDemoContent() {
         
         if (isSelecting) {
             // ドラッグしていなかった場合は1マスだけの選択/解除
-            if (!dragStarted && selectionStartPoint) {
+            if (!dragStarted && selectionStartPoint && selectionType === 'area') {
                 const { dateIndex, timeIndex } = selectionStartPoint;
                 toggleCellSelection(dateIndex, timeIndex);
             }
         }
-        
-        // 状態をリセット
         setIsSelecting(false);
         setSelectionStartPoint(null);
         setSelectionCurrentPoint(null);
+        setSelectionBaseSlots([]);
         setTouchActiveCell(null);
         setIsLongPressing(false);
         setLongPressStarted(false);
@@ -289,7 +344,7 @@ function ScheduleDemoContent() {
 
     // グローバルなマウス移動の検知（セル外でのドラッグにも対応）
     const handleGlobalMouseMove = () => {
-        if (!isSelecting) return;
+        if (!selectionStateRef.current.isSelecting) return;
 
         // マウスが移動したらドラッグ開始とみなす
         setDragStarted(true);
@@ -299,10 +354,12 @@ function ScheduleDemoContent() {
     const handleMouseUp = (e: MouseEvent) => {
         e.preventDefault();
 
-        if (isSelecting) {
+        const { isSelecting: selectingNow, dragStarted: dragStartedNow, selectionStartPoint: startPoint, selectionType: currentSelectionType } = selectionStateRef.current;
+
+        if (selectingNow) {
             // ドラッグしていなかった場合は1マスだけの選択/解除
-            if (!dragStarted && selectionStartPoint) {
-                const { dateIndex, timeIndex } = selectionStartPoint;
+            if (!dragStartedNow && startPoint && currentSelectionType === 'area') {
+                const { dateIndex, timeIndex } = startPoint;
                 toggleCellSelection(dateIndex, timeIndex);
             }
             // ドラッグしていた場合は範囲選択を確定（既に更新済みなので特に何もしない）
@@ -312,6 +369,7 @@ function ScheduleDemoContent() {
         setIsSelecting(false);
         setSelectionStartPoint(null);
         setSelectionCurrentPoint(null);
+        setSelectionBaseSlots([]);
 
         // イベントリスナーを削除
         window.removeEventListener('mouseup', handleMouseUp);
@@ -320,7 +378,7 @@ function ScheduleDemoContent() {
 
     // セルの選択状態をトグルする
     const toggleCellSelection = (dateIndex: number, timeIndex: number) => {
-        const slotId = `${dateIndex}-${timeIndex}`;
+        const slotId = getSlotId(dateIndex, timeIndex);
 
         setSelectedSlots(prev => {
             if (prev.includes(slotId)) {
@@ -331,9 +389,18 @@ function ScheduleDemoContent() {
         });
     };
 
+    useEffect(() => {
+        if (!(isSelecting && dragStarted && selectionType === 'area' && selectionStartPoint && selectionCurrentPoint)) {
+            return;
+        }
+
+        const areaSlotIds = getAreaSlotIds(selectionStartPoint, selectionCurrentPoint);
+        setSelectedSlots(toggleSlotsFromBaseSelection(selectionBaseSlots, areaSlotIds));
+    }, [dragStarted, isSelecting, selectionBaseSlots, selectionCurrentPoint, selectionStartPoint, selectionType]);
+
     // 選択状態に基づいて表示を更新（選択中の範囲を含む）
     const getCellStatus = (dateIndex: number, timeIndex: number) => {
-        const slotId = `${dateIndex}-${timeIndex}`;
+        const slotId = getSlotId(dateIndex, timeIndex);
         const availability = getAvailability(participants, slotId);
         const availabilityRatio = participants.length > 0 ? availability / participants.length : 0;
 
@@ -342,6 +409,7 @@ function ScheduleDemoContent() {
 
         // 選択操作中かつ範囲選択モードの場合、選択範囲内かどうかをチェック
         let isInActiveSelection = false;
+        let activeSelectionClass = '';
 
         if (isSelecting && dragStarted && selectionType === 'area' && selectionStartPoint && selectionCurrentPoint) {
             const startDateIndex = Math.min(selectionStartPoint.dateIndex, selectionCurrentPoint.dateIndex);
@@ -352,25 +420,16 @@ function ScheduleDemoContent() {
             if (dateIndex >= startDateIndex && dateIndex <= endDateIndex &&
                 timeIndex >= startTimeIndex && timeIndex <= endTimeIndex) {
                 isInActiveSelection = true;
-            }
-
-            // 範囲選択の処理（ドラッグ中に選択状態を更新）
-            if (isInActiveSelection && selectionCurrentPoint !== null) {
-                // 追加モードでは選択済みでなければ追加、削除モードでは選択済みなら削除
-                if (isAdding && !isSelected) {
-                    // 遅延なく追加するため、状態更新ではなく直接追加
-                    if (!selectedSlots.includes(slotId)) {
-                        setSelectedSlots(prev => [...prev, slotId]);
-                    }
-                } else if (!isAdding && isSelected) {
-                    setSelectedSlots(prev => prev.filter(id => id !== slotId));
-                }
+                activeSelectionClass = selectionBaseSlots.includes(slotId)
+                    ? 'active-deselecting'
+                    : 'active-selecting';
             }
         }
 
         return {
             isSelected,
             isInActiveSelection,
+            activeSelectionClass,
             availability,
             availabilityRatio
         };
@@ -502,8 +561,8 @@ function ScheduleDemoContent() {
                                         <div className="text-xs font-medium">{time}</div>
                                     </div>
                                     {dates.map((_, dateIndex) => {
-                                        const slotId = `${dateIndex}-${timeIndex}`;
-                                        const { isSelected, isInActiveSelection, availability } = getCellStatus(dateIndex, timeIndex);
+                                        const slotId = getSlotId(dateIndex, timeIndex);
+                                        const { isSelected, isInActiveSelection, activeSelectionClass, availability } = getCellStatus(dateIndex, timeIndex);
                                         const isHighlightedParticipantSlot = highlightedParticipant?.slots.includes(slotId) ?? false;
 
                                         const cellClassName = `
@@ -512,7 +571,7 @@ function ScheduleDemoContent() {
                                             border-r 
                                             border-[var(--border)] 
                                             ${isSelected ? 'selected' : ''} 
-                                            ${isInActiveSelection && dragStarted ? (isAdding ? 'active-selecting' : 'active-deselecting') : ''}
+                                            ${isInActiveSelection && dragStarted ? activeSelectionClass : ''}
                                             ${availability > 0 ? (availability === participants.length ? 'available' : 'partially') : ''}
                                             relative
                                         `;

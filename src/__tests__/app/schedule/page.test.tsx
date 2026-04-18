@@ -1,20 +1,74 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import SchedulePage from '@/app/schedule/[id]/page';
-import { getDoc, addDoc, onSnapshot } from 'firebase/firestore';
-import { useParams } from 'next/navigation';
+import { getDoc, onSnapshot, setDoc } from 'firebase/firestore';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
+import { useAuth } from '@/contexts/AuthContext';
 
 // next/navigationのモック
 jest.mock('next/navigation', () => ({
     useParams: jest.fn(),
+    useRouter: jest.fn(),
+    useSearchParams: jest.fn(),
+}));
+
+jest.mock('@/contexts/AuthContext', () => ({
+    useAuth: jest.fn(),
+}));
+
+jest.mock('@/components/AppHeader', () => ({
+    AppHeader: () => <div>AppHeader</div>,
+}));
+
+jest.mock('@/components/LoginModal', () => ({
+    LoginModal: ({ isOpen }: { isOpen: boolean }) => (isOpen ? <div>LoginModal</div> : null),
+}));
+
+jest.mock('@/lib/auth', () => ({
+    getUserDisplayName: jest.fn().mockReturnValue('テストログインユーザー'),
 }));
 
 describe('SchedulePage', () => {
+    const mockPush = jest.fn();
+    const mockReplace = jest.fn();
+
+    const waitForScheduleToLoad = async () => {
+        await waitFor(() => {
+            expect(screen.getByText('テストイベント')).toBeInTheDocument();
+        });
+    };
+
+    const getCell = (container: HTMLElement, dateIndex: number, timeIndex: number) => {
+        const cell = container.querySelector(
+            `[data-date-index="${dateIndex}"][data-time-index="${timeIndex}"]`
+        );
+
+        expect(cell).not.toBeNull();
+        return cell as HTMLElement;
+    };
+
     // テスト前の準備
     beforeEach(() => {
+        jest.clearAllMocks();
+
         // useParamsのモック
         (useParams as jest.Mock).mockReturnValue({
             id: 'test-schedule-id',
+        });
+        (useRouter as jest.Mock).mockReturnValue({
+            push: mockPush,
+            replace: mockReplace,
+        });
+        (useSearchParams as jest.Mock).mockReturnValue({
+            get: jest.fn((key: string) => (key === 'mode' ? 'edit' : null)),
+        });
+        (useAuth as jest.Mock).mockReturnValue({
+            user: {
+                uid: 'test-user',
+                isAnonymous: true,
+            },
+            loading: false,
+            signInAnonymously: jest.fn(),
         });
 
         // onSnapshotのモック
@@ -24,6 +78,7 @@ describe('SchedulePage', () => {
                     {
                         id: 'participant1',
                         data: () => ({
+                            userId: 'participant1',
                             name: 'テスト参加者1',
                             slots: ['0-0', '0-1'],
                             createdAt: new Date(),
@@ -32,6 +87,7 @@ describe('SchedulePage', () => {
                     {
                         id: 'participant2',
                         data: () => ({
+                            userId: 'participant2',
                             name: 'テスト参加者2',
                             slots: ['0-0', '1-0'],
                             createdAt: new Date(),
@@ -43,18 +99,29 @@ describe('SchedulePage', () => {
         });
 
         // getDocのモック
-        (getDoc as jest.Mock).mockResolvedValue({
-            exists: () => true,
-            data: () => ({
-                name: 'テストイベント',
-                description: 'テスト用の説明',
-                startDate: '2025-05-15',
-                endDate: '2025-05-17',
-                startTime: '09:00',
-                endTime: '17:00',
-                duration: 30,
-                createdAt: new Date(),
-            }),
+        (getDoc as jest.Mock).mockImplementation(async (ref) => {
+            if (ref?.path === 'schedules/test-schedule-id/participants/test-user') {
+                return {
+                    exists: () => false,
+                    data: () => null,
+                };
+            }
+
+            return {
+                exists: () => true,
+                data: () => ({
+                    name: 'テストイベント',
+                    description: 'テスト用の説明',
+                    startDate: '2025-05-15',
+                    endDate: '2025-05-17',
+                    startTime: '09:00',
+                    endTime: '17:00',
+                    duration: 30,
+                    createdAt: {
+                        toDate: () => new Date(),
+                    },
+                }),
+            };
         });
     });
 
@@ -78,48 +145,91 @@ describe('SchedulePage', () => {
     });
 
     test('参加情報を登録できること', async () => {
-        render(<SchedulePage />);
+        const { container } = render(<SchedulePage />);
 
-        // スケジュールデータの読み込み完了を待機
-        await waitFor(() => {
-            expect(screen.getByText('テストイベント')).toBeInTheDocument();
-        });
+        await waitForScheduleToLoad();
 
         // 参加者名を入力
         fireEvent.change(screen.getByLabelText(/お名前/i), {
             target: { value: 'テスト参加者3' },
         });
 
-        // 時間枠を選択（モックでは実際のDOM要素がないため、選択済みとする）
-        // 実際のテストでは、時間枠のセルをクリックする処理が必要
+        const firstCell = getCell(container, 0, 0);
+        fireEvent.mouseDown(firstCell);
+        fireEvent.mouseUp(window);
 
-        // 参加情報を登録ボタンをクリック
-        const submitButton = screen.getByRole('button', { name: /参加情報を登録/i });
-
-        // ボタンが無効になっていることを確認（選択済み時間枠がないため）
-        expect(submitButton).toBeDisabled();
-
-        // 選択済み時間枠があるとして、addDocが呼ばれることをテスト
-        // これは実際のDOMイベントをシミュレートできないため、内部実装をテスト
-        jest.spyOn(React, 'useState').mockImplementationOnce(() => ['テスト参加者3', jest.fn()]);
-        jest.spyOn(React, 'useState').mockImplementationOnce(() => [['0-0'], jest.fn()]);
-
-        // 参加情報を登録
-        fireEvent.click(submitButton);
-
-        // addDocが呼ばれたことを確認
         await waitFor(() => {
-            expect(addDoc).toHaveBeenCalled();
+            expect(firstCell).toHaveClass('selected');
         });
 
-        // 正しいデータで呼ばれたことを確認
-        expect(addDoc).toHaveBeenCalledWith(
+        const submitButton = screen.getByRole('button', { name: /参加情報を登録/i });
+
+        expect(submitButton).toBeEnabled();
+
+        fireEvent.click(submitButton);
+
+        await waitFor(() => {
+            expect(setDoc).toHaveBeenCalled();
+        });
+
+        expect(setDoc).toHaveBeenCalledWith(
             expect.anything(),
             expect.objectContaining({
                 name: 'テスト参加者3',
                 slots: ['0-0'],
+                userId: 'test-user',
             })
+            ,
+            { merge: true }
         );
+        expect(mockPush).toHaveBeenCalledWith('/schedule/test-schedule-id?mode=view');
+    });
+
+    test('なぞり選択モードでも単一セルを選択できること', async () => {
+        const { container } = render(<SchedulePage />);
+
+        await waitForScheduleToLoad();
+
+        fireEvent.click(screen.getByLabelText('なぞり選択'));
+
+        const firstCell = getCell(container, 0, 0);
+        fireEvent.mouseDown(firstCell);
+        fireEvent.mouseUp(window);
+
+        await waitFor(() => {
+            expect(firstCell).toHaveClass('selected');
+            expect(screen.getByText(/選択済み時間枠:\s*1/)).toBeInTheDocument();
+        });
+    });
+
+    test('範囲選択は開始マスに関係なく範囲内の状態を反転すること', async () => {
+        const { container } = render(<SchedulePage />);
+
+        await waitForScheduleToLoad();
+
+        const selectedCell = getCell(container, 0, 0);
+        const unselectedCell = getCell(container, 1, 0);
+
+        fireEvent.mouseDown(selectedCell);
+        fireEvent.mouseUp(window);
+
+        await waitFor(() => {
+            expect(selectedCell).toHaveClass('selected');
+        });
+
+        fireEvent.mouseDown(unselectedCell);
+        fireEvent.mouseEnter(selectedCell);
+
+        await waitFor(() => {
+            expect(unselectedCell).toHaveClass('selected');
+            expect(selectedCell).not.toHaveClass('selected');
+        });
+
+        fireEvent.mouseUp(window);
+
+        await waitFor(() => {
+            expect(screen.getByText(/選択済み時間枠:\s*1/)).toBeInTheDocument();
+        });
     });
 
     test('エラー時にエラーメッセージが表示されること', async () => {

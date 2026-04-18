@@ -54,6 +54,13 @@ describe('SchedulePage', () => {
         return calendarContainer as HTMLDivElement;
     };
 
+    const getCalendarGrid = (container: HTMLElement) => {
+        const calendarGrid = container.querySelector('.calendar-grid');
+
+        expect(calendarGrid).not.toBeNull();
+        return calendarGrid as HTMLDivElement;
+    };
+
     // テスト前の準備
     beforeEach(() => {
         jest.clearAllMocks();
@@ -150,6 +157,16 @@ describe('SchedulePage', () => {
             expect(screen.queryByText(/参加者一覧/)).not.toBeInTheDocument();
             expect(screen.queryByText(/重なりが大きい候補/)).not.toBeInTheDocument();
         });
+
+        const calendarGrid = getCalendarGrid(container);
+        const cornerHeader = container.querySelector('.time-header');
+        const dateHeader = container.querySelector('.date-header');
+        const timeLabel = container.querySelector('.time-label');
+
+        expect(calendarGrid).toHaveStyle({ overflow: 'visible' });
+        expect(cornerHeader).toHaveStyle({ zIndex: '60' });
+        expect(dateHeader).toHaveStyle({ zIndex: '50' });
+        expect(timeLabel).toHaveStyle({ zIndex: '40' });
 
         const overlappingCell = getCell(container, 0, 0);
         expect(overlappingCell).not.toHaveTextContent('2');

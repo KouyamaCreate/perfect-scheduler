@@ -883,13 +883,21 @@ export default function SchedulePage() {
                             <div
                                 className="calendar-grid"
                                 style={{
-                                    gridTemplateColumns: `auto ${dates.map(() => '1fr').join(' ')}`
+                                    gridTemplateColumns: `auto ${dates.map(() => '1fr').join(' ')}`,
+                                    overflow: 'visible',
                                 }}
                             >
                             {/* 日付ヘッダー */}
-                            <div className="time-header sticky top-0 left-0 z-20 bg-[var(--background)] border-b border-r border-[var(--border)]"></div>
+                            <div
+                                className="time-header sticky top-0 left-0 bg-[var(--background)] border-b border-r border-[var(--border)]"
+                                style={{ zIndex: 60 }}
+                            ></div>
                             {dates.map((date, index) => (
-                                <div key={index} className="date-header sticky top-0 z-10 bg-[var(--background)] text-center font-bold border-b border-r border-[var(--border)]">
+                                <div
+                                    key={index}
+                                    className="date-header sticky top-0 bg-[var(--background)] text-center font-bold border-b border-r border-[var(--border)]"
+                                    style={{ zIndex: 50 }}
+                                >
                                     <div className="text-xs">{formatDate(date)}</div>
                                 </div>
                             ))}
@@ -897,7 +905,10 @@ export default function SchedulePage() {
                             {/* 時間スロット */}
                             {timeSlots.map((time, timeIndex) => (
                                 <React.Fragment key={timeIndex}>
-                                    <div className="time-label sticky left-0 z-10 bg-[var(--background)] border-b border-r border-[var(--border)] whitespace-nowrap">
+                                    <div
+                                        className="time-label sticky left-0 bg-[var(--background)] border-b border-r border-[var(--border)] whitespace-nowrap"
+                                        style={{ zIndex: 40 }}
+                                    >
                                         <div className="text-xs font-medium">{time}</div>
                                     </div>
                                     {dates.map((_, dateIndex) => {
@@ -1201,6 +1212,7 @@ export default function SchedulePage() {
                     position: relative;
                     overscroll-behavior: contain;
                     -webkit-overflow-scrolling: touch;
+                    isolation: isolate;
                 }
 
                 .calendar-container.touch-selecting {
@@ -1236,6 +1248,7 @@ export default function SchedulePage() {
                 .calendar-grid {
                     display: grid;
                     min-width: max-content;
+                    overflow: visible;
                 }
                 
                 /* 固定ヘッダー */
@@ -1249,6 +1262,7 @@ export default function SchedulePage() {
                     justify-content: center;
                     color: var(--foreground-muted);
                     touch-action: auto;
+                    box-shadow: 0 1px 0 0 var(--border), 8px 0 14px rgba(50, 50, 50, 0.05);
                 }
                 
                 .date-header {
@@ -1262,6 +1276,7 @@ export default function SchedulePage() {
                     background: #f8fbff;
                     color: var(--primary-strong);
                     touch-action: pan-x;
+                    box-shadow: 0 1px 0 0 var(--border);
                 }
                 
                 .time-label {
@@ -1275,6 +1290,7 @@ export default function SchedulePage() {
                     background: #f8fbff;
                     color: var(--foreground-muted);
                     touch-action: pan-y;
+                    box-shadow: 8px 0 14px rgba(50, 50, 50, 0.05);
                 }
                 
                 .time-slot {

@@ -1,5 +1,6 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { toBlob } from 'html-to-image';
 import SchedulePage from '@/app/schedule/[id]/page';
 import { getDoc, onSnapshot, setDoc } from 'firebase/firestore';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
@@ -28,6 +29,10 @@ jest.mock('@/lib/auth', () => ({
     getUserDisplayName: jest.fn().mockReturnValue('テストログインユーザー'),
 }));
 
+jest.mock('html-to-image', () => ({
+    toBlob: jest.fn(),
+}));
+
 describe('SchedulePage', () => {
     const mockPush = jest.fn();
     const mockReplace = jest.fn();
@@ -47,9 +52,52 @@ describe('SchedulePage', () => {
         return cell as HTMLElement;
     };
 
+    const getCalendarContainer = (container: HTMLElement) => {
+        const calendarContainer = container.querySelector('.calendar-container');
+
+        expect(calendarContainer).not.toBeNull();
+        return calendarContainer as HTMLDivElement;
+    };
+
+    const getCalendarGrid = (container: HTMLElement) => {
+        const calendarGrid = container.querySelector('.calendar-grid');
+
+        expect(calendarGrid).not.toBeNull();
+        return calendarGrid as HTMLDivElement;
+    };
+
     // テスト前の準備
     beforeEach(() => {
         jest.clearAllMocks();
+        (toBlob as jest.Mock).mockResolvedValue(new Blob(['calendar'], { type: 'image/png' }));
+
+        Object.defineProperty(navigator, 'clipboard', {
+            configurable: true,
+            value: {
+                writeText: jest.fn(),
+                write: jest.fn().mockResolvedValue(undefined),
+            },
+        });
+
+        Object.defineProperty(window, 'ClipboardItem', {
+            configurable: true,
+            writable: true,
+            value: jest.fn().mockImplementation((items) => items),
+        });
+
+        Object.defineProperty(HTMLElement.prototype, 'requestFullscreen', {
+            configurable: true,
+            value: jest.fn().mockResolvedValue(undefined),
+        });
+        Object.defineProperty(document, 'exitFullscreen', {
+            configurable: true,
+            value: jest.fn().mockResolvedValue(undefined),
+        });
+        Object.defineProperty(document, 'fullscreenElement', {
+            configurable: true,
+            writable: true,
+            value: null,
+        });
 
         // useParamsのモック
         (useParams as jest.Mock).mockReturnValue({
@@ -144,6 +192,19 @@ describe('SchedulePage', () => {
             expect(screen.queryByText(/重なりが大きい候補/)).not.toBeInTheDocument();
         });
 
+        const calendarGrid = getCalendarGrid(container);
+        const cornerHeader = container.querySelector('.time-header');
+        const dateHeader = container.querySelector('.date-header');
+        const timeLabel = container.querySelector('.time-label');
+
+        expect(calendarGrid).toHaveStyle({ overflow: 'visible' });
+        expect(calendarGrid).toHaveStyle({
+            gridTemplateColumns: 'var(--calendar-time-label-width) repeat(3, var(--calendar-slot-width))',
+        });
+        expect(cornerHeader).toHaveStyle({ zIndex: '60' });
+        expect(dateHeader).toHaveStyle({ zIndex: '50' });
+        expect(timeLabel).toHaveStyle({ zIndex: '40' });
+
         const overlappingCell = getCell(container, 0, 0);
         expect(overlappingCell).not.toHaveTextContent('2');
     });
@@ -162,10 +223,64 @@ describe('SchedulePage', () => {
             expect(screen.getByText('テスト参加者2')).toBeInTheDocument();
             expect(screen.getByText(/参加者一覧 \(2\)/)).toBeInTheDocument();
             expect(screen.getByText(/重なりが大きい候補/)).toBeInTheDocument();
+            expect(screen.getByLabelText('通常表示')).toBeInTheDocument();
+            expect(screen.getByLabelText('全体表示')).toBeInTheDocument();
+            expect(screen.getByRole('button', { name: '表を全画面表示' })).toBeInTheDocument();
+            expect(screen.getByRole('button', { name: '表を画像コピー' })).toBeInTheDocument();
         });
 
         const overlappingCell = getCell(container, 0, 0);
         expect(overlappingCell).toHaveTextContent('2');
+    });
+
+    test('閲覧画面で全体表示モードに切り替えられること', async () => {
+        (useSearchParams as jest.Mock).mockReturnValue({
+            get: jest.fn((key: string) => (key === 'mode' ? 'view' : null)),
+        });
+
+        const { container } = render(<SchedulePage />);
+
+        await waitForScheduleToLoad();
+
+        const calendarContainer = getCalendarContainer(container);
+        fireEvent.click(screen.getByLabelText('全体表示'));
+
+        await waitFor(() => {
+            expect(calendarContainer).toHaveClass('calendar-container-fit');
+        });
+    });
+
+    test('閲覧画面で表を全画面表示できること', async () => {
+        (useSearchParams as jest.Mock).mockReturnValue({
+            get: jest.fn((key: string) => (key === 'mode' ? 'view' : null)),
+        });
+
+        render(<SchedulePage />);
+
+        await waitForScheduleToLoad();
+
+        fireEvent.click(screen.getByRole('button', { name: '表を全画面表示' }));
+
+        await waitFor(() => {
+            expect(HTMLElement.prototype.requestFullscreen).toHaveBeenCalled();
+        });
+    });
+
+    test('閲覧画面で表全体を画像としてクリップボードにコピーできること', async () => {
+        (useSearchParams as jest.Mock).mockReturnValue({
+            get: jest.fn((key: string) => (key === 'mode' ? 'view' : null)),
+        });
+
+        render(<SchedulePage />);
+
+        await waitForScheduleToLoad();
+
+        fireEvent.click(screen.getByRole('button', { name: '表を画像コピー' }));
+
+        await waitFor(() => {
+            expect(toBlob).toHaveBeenCalled();
+            expect(navigator.clipboard.write).toHaveBeenCalled();
+        });
     });
 
     test('参加情報を登録できること', async () => {
@@ -224,6 +339,178 @@ describe('SchedulePage', () => {
             expect(firstCell).toHaveClass('selected');
             expect(screen.getByText(/選択済み時間枠:\s*1/)).toBeInTheDocument();
         });
+    });
+
+    test('タッチ操作でも単一セルを選択できること', async () => {
+        const { container } = render(<SchedulePage />);
+
+        await waitForScheduleToLoad();
+
+        const firstCell = getCell(container, 0, 0);
+
+        fireEvent.touchStart(firstCell, {
+            touches: [{ identifier: 11, clientX: 40, clientY: 40 }],
+            changedTouches: [{ identifier: 11, clientX: 40, clientY: 40 }],
+        });
+        fireEvent.touchEnd(window, {
+            touches: [],
+            changedTouches: [{ identifier: 11, clientX: 40, clientY: 40 }],
+        });
+
+        await waitFor(() => {
+            expect(firstCell).toHaveClass('selected');
+            expect(screen.getByText(/選択済み時間枠:\s*1/)).toBeInTheDocument();
+        });
+    });
+
+    test('タッチのなぞり選択でも複数セルを選択できること', async () => {
+        const { container } = render(<SchedulePage />);
+
+        await waitForScheduleToLoad();
+
+        fireEvent.click(screen.getByLabelText('なぞり選択'));
+
+        const firstCell = getCell(container, 0, 0);
+        const secondCell = getCell(container, 1, 0);
+        const originalElementFromPoint = (document as Document & {
+            elementFromPoint?: (x: number, y: number) => Element | null;
+        }).elementFromPoint;
+        Object.defineProperty(document, 'elementFromPoint', {
+            configurable: true,
+            writable: true,
+            value: jest.fn(() => secondCell),
+        });
+
+        fireEvent.touchStart(firstCell, {
+            touches: [{ identifier: 21, clientX: 40, clientY: 40 }],
+            changedTouches: [{ identifier: 21, clientX: 40, clientY: 40 }],
+        });
+        fireEvent.touchMove(window, {
+            touches: [{ identifier: 21, clientX: 88, clientY: 40 }],
+            changedTouches: [{ identifier: 21, clientX: 88, clientY: 40 }],
+        });
+
+        await waitFor(() => {
+            expect(firstCell).toHaveClass('selected');
+            expect(secondCell).toHaveClass('selected');
+        });
+
+        fireEvent.touchEnd(window, {
+            touches: [],
+            changedTouches: [{ identifier: 21, clientX: 88, clientY: 40 }],
+        });
+
+        Object.defineProperty(document, 'elementFromPoint', {
+            configurable: true,
+            writable: true,
+            value: originalElementFromPoint,
+        });
+
+        await waitFor(() => {
+            expect(screen.getByText(/選択済み時間枠:\s*2/)).toBeInTheDocument();
+        });
+    });
+
+    test('タッチ選択を表示端まで伸ばすと自動スクロールを開始すること', async () => {
+        const { container } = render(<SchedulePage />);
+
+        await waitForScheduleToLoad();
+
+        const calendarContainer = getCalendarContainer(container);
+        const firstCell = getCell(container, 0, 0);
+        const originalElementFromPoint = (document as Document & {
+            elementFromPoint?: (x: number, y: number) => Element | null;
+        }).elementFromPoint;
+        const requestAnimationFrameSpy = jest
+            .spyOn(window, 'requestAnimationFrame')
+            .mockImplementation(() => 1);
+
+        Object.defineProperty(document, 'elementFromPoint', {
+            configurable: true,
+            writable: true,
+            value: jest.fn(() => firstCell),
+        });
+        Object.defineProperty(calendarContainer, 'getBoundingClientRect', {
+            configurable: true,
+            value: jest.fn(() => ({
+                left: 0,
+                top: 0,
+                right: 100,
+                bottom: 100,
+                width: 100,
+                height: 100,
+                x: 0,
+                y: 0,
+                toJSON: () => ({}),
+            })),
+        });
+
+        fireEvent.touchStart(firstCell, {
+            touches: [{ identifier: 31, clientX: 50, clientY: 50 }],
+            changedTouches: [{ identifier: 31, clientX: 50, clientY: 50 }],
+        });
+        fireEvent.touchMove(window, {
+            touches: [{ identifier: 31, clientX: 96, clientY: 96 }],
+            changedTouches: [{ identifier: 31, clientX: 96, clientY: 96 }],
+        });
+
+        expect(requestAnimationFrameSpy).toHaveBeenCalled();
+
+        fireEvent.touchEnd(window, {
+            touches: [],
+            changedTouches: [{ identifier: 31, clientX: 96, clientY: 96 }],
+        });
+
+        requestAnimationFrameSpy.mockRestore();
+        Object.defineProperty(document, 'elementFromPoint', {
+            configurable: true,
+            writable: true,
+            value: originalElementFromPoint,
+        });
+    });
+
+    test('予定選択エリア上の2本指スクロールで上下左右に移動できること', async () => {
+        const { container } = render(<SchedulePage />);
+
+        await waitForScheduleToLoad();
+
+        const calendarContainer = getCalendarContainer(container);
+        const firstCell = getCell(container, 0, 0);
+
+        Object.defineProperty(calendarContainer, 'scrollLeft', {
+            configurable: true,
+            writable: true,
+            value: 100,
+        });
+        Object.defineProperty(calendarContainer, 'scrollTop', {
+            configurable: true,
+            writable: true,
+            value: 120,
+        });
+
+        fireEvent.touchStart(firstCell, {
+            touches: [
+                { identifier: 41, clientX: 20, clientY: 20 },
+                { identifier: 42, clientX: 40, clientY: 40 },
+            ],
+            changedTouches: [
+                { identifier: 41, clientX: 20, clientY: 20 },
+                { identifier: 42, clientX: 40, clientY: 40 },
+            ],
+        });
+        fireEvent.touchMove(calendarContainer, {
+            touches: [
+                { identifier: 41, clientX: 40, clientY: 30 },
+                { identifier: 42, clientX: 60, clientY: 50 },
+            ],
+            changedTouches: [
+                { identifier: 41, clientX: 40, clientY: 30 },
+                { identifier: 42, clientX: 60, clientY: 50 },
+            ],
+        });
+
+        expect(calendarContainer.scrollLeft).toBe(80);
+        expect(calendarContainer.scrollTop).toBe(110);
     });
 
     test('範囲選択は開始マスが未選択なら範囲全体を追加すること', async () => {

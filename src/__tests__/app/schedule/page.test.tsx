@@ -47,6 +47,13 @@ describe('SchedulePage', () => {
         return cell as HTMLElement;
     };
 
+    const getCalendarContainer = (container: HTMLElement) => {
+        const calendarContainer = container.querySelector('.calendar-container');
+
+        expect(calendarContainer).not.toBeNull();
+        return calendarContainer as HTMLDivElement;
+    };
+
     // テスト前の準備
     beforeEach(() => {
         jest.clearAllMocks();
@@ -285,19 +292,117 @@ describe('SchedulePage', () => {
             changedTouches: [{ identifier: 21, clientX: 88, clientY: 40 }],
         });
 
-        if (originalElementFromPoint) {
-            Object.defineProperty(document, 'elementFromPoint', {
-                configurable: true,
-                writable: true,
-                value: originalElementFromPoint,
-            });
-        } else {
-            delete (document as Document & { elementFromPoint?: (x: number, y: number) => Element | null; }).elementFromPoint;
-        }
+        Object.defineProperty(document, 'elementFromPoint', {
+            configurable: true,
+            writable: true,
+            value: originalElementFromPoint,
+        });
 
         await waitFor(() => {
             expect(screen.getByText(/選択済み時間枠:\s*2/)).toBeInTheDocument();
         });
+    });
+
+    test('タッチ選択を表示端まで伸ばすと自動スクロールを開始すること', async () => {
+        const { container } = render(<SchedulePage />);
+
+        await waitForScheduleToLoad();
+
+        const calendarContainer = getCalendarContainer(container);
+        const firstCell = getCell(container, 0, 0);
+        const originalElementFromPoint = (document as Document & {
+            elementFromPoint?: (x: number, y: number) => Element | null;
+        }).elementFromPoint;
+        const requestAnimationFrameSpy = jest
+            .spyOn(window, 'requestAnimationFrame')
+            .mockImplementation(() => 1);
+
+        Object.defineProperty(document, 'elementFromPoint', {
+            configurable: true,
+            writable: true,
+            value: jest.fn(() => firstCell),
+        });
+        Object.defineProperty(calendarContainer, 'getBoundingClientRect', {
+            configurable: true,
+            value: jest.fn(() => ({
+                left: 0,
+                top: 0,
+                right: 100,
+                bottom: 100,
+                width: 100,
+                height: 100,
+                x: 0,
+                y: 0,
+                toJSON: () => ({}),
+            })),
+        });
+
+        fireEvent.touchStart(firstCell, {
+            touches: [{ identifier: 31, clientX: 50, clientY: 50 }],
+            changedTouches: [{ identifier: 31, clientX: 50, clientY: 50 }],
+        });
+        fireEvent.touchMove(window, {
+            touches: [{ identifier: 31, clientX: 96, clientY: 96 }],
+            changedTouches: [{ identifier: 31, clientX: 96, clientY: 96 }],
+        });
+
+        expect(requestAnimationFrameSpy).toHaveBeenCalled();
+
+        fireEvent.touchEnd(window, {
+            touches: [],
+            changedTouches: [{ identifier: 31, clientX: 96, clientY: 96 }],
+        });
+
+        requestAnimationFrameSpy.mockRestore();
+        Object.defineProperty(document, 'elementFromPoint', {
+            configurable: true,
+            writable: true,
+            value: originalElementFromPoint,
+        });
+    });
+
+    test('予定選択エリア上の2本指スクロールで上下左右に移動できること', async () => {
+        const { container } = render(<SchedulePage />);
+
+        await waitForScheduleToLoad();
+
+        const calendarContainer = getCalendarContainer(container);
+        const firstCell = getCell(container, 0, 0);
+
+        Object.defineProperty(calendarContainer, 'scrollLeft', {
+            configurable: true,
+            writable: true,
+            value: 100,
+        });
+        Object.defineProperty(calendarContainer, 'scrollTop', {
+            configurable: true,
+            writable: true,
+            value: 120,
+        });
+
+        fireEvent.touchStart(firstCell, {
+            touches: [
+                { identifier: 41, clientX: 20, clientY: 20 },
+                { identifier: 42, clientX: 40, clientY: 40 },
+            ],
+            changedTouches: [
+                { identifier: 41, clientX: 20, clientY: 20 },
+                { identifier: 42, clientX: 40, clientY: 40 },
+            ],
+        });
+        fireEvent.touchMove(calendarContainer, {
+            touches: [
+                { identifier: 41, clientX: 40, clientY: 30 },
+                { identifier: 42, clientX: 60, clientY: 50 },
+            ],
+            changedTouches: [
+                { identifier: 41, clientX: 40, clientY: 30 },
+                { identifier: 42, clientX: 60, clientY: 50 },
+            ],
+        });
+
+        expect(calendarContainer.scrollLeft).toBe(80);
+        expect(calendarContainer.scrollTop).toBe(110);
     });
 
     test('範囲選択は開始マスが未選択なら範囲全体を追加すること', async () => {

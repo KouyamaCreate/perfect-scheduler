@@ -63,6 +63,17 @@ export default function SchedulePage() {
     const [isTouchSelecting, setIsTouchSelecting] = useState(false);
     const activeTouchIdRef = useRef<number | null>(null);
     const touchAbortControllerRef = useRef<AbortController | null>(null);
+    const calendarContainerRef = useRef<HTMLDivElement | null>(null);
+    const touchClientPointRef = useRef<{ clientX: number; clientY: number } | null>(null);
+    const autoScrollFrameRef = useRef<number | null>(null);
+    const autoScrollVelocityRef = useRef({ x: 0, y: 0 });
+    const twoFingerScrollStateRef = useRef<{
+        active: boolean;
+        lastMidpoint: { clientX: number; clientY: number } | null;
+    }>({
+        active: false,
+        lastMidpoint: null,
+    });
     const selectionStateRef = useRef<{
         isSelecting: boolean;
         dragStarted: boolean;
@@ -228,6 +239,9 @@ export default function SchedulePage() {
     useEffect(() => {
         return () => {
             touchAbortControllerRef.current?.abort();
+            if (autoScrollFrameRef.current !== null) {
+                window.cancelAnimationFrame(autoScrollFrameRef.current);
+            }
             document.body.classList.remove('touch-selection-lock');
         };
     }, []);
@@ -253,6 +267,59 @@ export default function SchedulePage() {
         return {
             dateIndex: parseInt(dateIndex, 10),
             timeIndex: parseInt(timeIndex, 10),
+        };
+    };
+
+    const getTouchMidpoint = (touches: ArrayLike<{ clientX: number; clientY: number }>) => {
+        if (touches.length < 2) {
+            return null;
+        }
+
+        const firstTouch = touches[0];
+        const secondTouch = touches[1];
+
+        return {
+            clientX: (firstTouch.clientX + secondTouch.clientX) / 2,
+            clientY: (firstTouch.clientY + secondTouch.clientY) / 2,
+        };
+    };
+
+    const stopAutoScroll = () => {
+        if (autoScrollFrameRef.current !== null) {
+            window.cancelAnimationFrame(autoScrollFrameRef.current);
+            autoScrollFrameRef.current = null;
+        }
+
+        autoScrollVelocityRef.current = { x: 0, y: 0 };
+    };
+
+    const getAutoScrollVelocity = (clientX: number, clientY: number) => {
+        const container = calendarContainerRef.current;
+        if (!container) {
+            return { x: 0, y: 0 };
+        }
+
+        const rect = container.getBoundingClientRect();
+        const edgeThreshold = 48;
+        const maxSpeed = 18;
+
+        const computeAxisVelocity = (position: number, start: number, end: number) => {
+            if (position < start + edgeThreshold) {
+                const distance = Math.max(0, position - start);
+                return -Math.ceil((1 - distance / edgeThreshold) * maxSpeed);
+            }
+
+            if (position > end - edgeThreshold) {
+                const distance = Math.max(0, end - position);
+                return Math.ceil((1 - distance / edgeThreshold) * maxSpeed);
+            }
+
+            return 0;
+        };
+
+        return {
+            x: computeAxisVelocity(clientX, rect.left, rect.right),
+            y: computeAxisVelocity(clientY, rect.top, rect.bottom),
         };
     };
 
@@ -290,6 +357,67 @@ export default function SchedulePage() {
         return baseSlots.filter(slotId => !areaSlotIdSet.has(slotId));
     };
 
+    const updateTouchSelectionPoint = (clientX: number, clientY: number) => {
+        const targetElement = typeof document.elementFromPoint === 'function'
+            ? document.elementFromPoint(clientX, clientY)
+            : null;
+        const point = findSlotPointFromElement(targetElement);
+
+        if (!point) {
+            return;
+        }
+
+        const currentPoint = selectionStateRef.current.selectionCurrentPoint;
+        if (currentPoint &&
+            currentPoint.dateIndex === point.dateIndex &&
+            currentPoint.timeIndex === point.timeIndex) {
+            return;
+        }
+
+        setDragStarted(true);
+        setSelectionCurrentPoint(point);
+        setTouchActiveCell(point);
+    };
+
+    const startAutoScroll = () => {
+        if (autoScrollFrameRef.current !== null) {
+            return;
+        }
+
+        const step = () => {
+            autoScrollFrameRef.current = null;
+
+            const container = calendarContainerRef.current;
+            const touchPoint = touchClientPointRef.current;
+            const { x, y } = autoScrollVelocityRef.current;
+
+            if (!container || !touchPoint || !selectionStateRef.current.isSelecting || twoFingerScrollStateRef.current.active) {
+                autoScrollVelocityRef.current = { x: 0, y: 0 };
+                return;
+            }
+
+            if (x === 0 && y === 0) {
+                return;
+            }
+
+            const previousScrollLeft = container.scrollLeft;
+            const previousScrollTop = container.scrollTop;
+            container.scrollBy({ left: x, top: y });
+
+            if (container.scrollLeft !== previousScrollLeft || container.scrollTop !== previousScrollTop) {
+                updateTouchSelectionPoint(touchPoint.clientX, touchPoint.clientY);
+            }
+
+            autoScrollVelocityRef.current = getAutoScrollVelocity(touchPoint.clientX, touchPoint.clientY);
+
+            if (autoScrollVelocityRef.current.x !== 0 || autoScrollVelocityRef.current.y !== 0) {
+                autoScrollFrameRef.current = window.requestAnimationFrame(step);
+            }
+        };
+
+        autoScrollFrameRef.current = window.requestAnimationFrame(step);
+    };
+
     const beginSelection = (dateIndex: number, timeIndex: number) => {
         const slotId = getSlotId(dateIndex, timeIndex);
         const isSelected = selectedSlots.includes(slotId);
@@ -310,8 +438,10 @@ export default function SchedulePage() {
         touchAbortControllerRef.current?.abort();
         touchAbortControllerRef.current = null;
         activeTouchIdRef.current = null;
+        touchClientPointRef.current = null;
         setTouchActiveCell(null);
         setIsTouchSelecting(false);
+        stopAutoScroll();
         document.body.classList.remove('touch-selection-lock');
     };
 
@@ -333,6 +463,64 @@ export default function SchedulePage() {
         setSelectionCurrentPoint(null);
         setSelectionBaseSlots([]);
         clearTouchInteraction();
+    };
+
+    const beginTwoFingerScroll = (touches: ArrayLike<{ clientX: number; clientY: number }>) => {
+        const midpoint = getTouchMidpoint(touches);
+        if (!midpoint) {
+            return;
+        }
+
+        if (selectionStateRef.current.isSelecting) {
+            finishSelection(false);
+        }
+
+        touchClientPointRef.current = null;
+        stopAutoScroll();
+        twoFingerScrollStateRef.current = {
+            active: true,
+            lastMidpoint: midpoint,
+        };
+    };
+
+    const handleCalendarTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+        if (e.touches.length < 2) {
+            return;
+        }
+
+        e.preventDefault();
+        beginTwoFingerScroll(e.touches);
+    };
+
+    const handleCalendarTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
+        if (!twoFingerScrollStateRef.current.active || e.touches.length < 2) {
+            return;
+        }
+
+        const midpoint = getTouchMidpoint(e.touches);
+        const lastMidpoint = twoFingerScrollStateRef.current.lastMidpoint;
+        const container = calendarContainerRef.current;
+
+        if (!midpoint || !lastMidpoint || !container) {
+            return;
+        }
+
+        e.preventDefault();
+        container.scrollLeft -= midpoint.clientX - lastMidpoint.clientX;
+        container.scrollTop -= midpoint.clientY - lastMidpoint.clientY;
+        twoFingerScrollStateRef.current.lastMidpoint = midpoint;
+    };
+
+    const handleCalendarTouchEnd = (e: React.TouchEvent<HTMLDivElement>) => {
+        if (e.touches.length >= 2) {
+            twoFingerScrollStateRef.current.lastMidpoint = getTouchMidpoint(e.touches);
+            return;
+        }
+
+        twoFingerScrollStateRef.current = {
+            active: false,
+            lastMidpoint: null,
+        };
     };
 
     // 参加者を追加する
@@ -410,6 +598,10 @@ export default function SchedulePage() {
 
         clearTouchInteraction();
         activeTouchIdRef.current = touch.identifier;
+        touchClientPointRef.current = {
+            clientX: touch.clientX,
+            clientY: touch.clientY,
+        };
         setIsTouchSelecting(true);
         setTouchActiveCell({ dateIndex, timeIndex });
         document.body.classList.add('touch-selection-lock');
@@ -433,25 +625,24 @@ export default function SchedulePage() {
 
     const handleGlobalTouchMove = (e: TouchEvent) => {
         const activeTouchId = activeTouchIdRef.current;
-        if (activeTouchId === null || !selectionStateRef.current.isSelecting) return;
+        if (activeTouchId === null || !selectionStateRef.current.isSelecting || twoFingerScrollStateRef.current.active) return;
 
         const touch = Array.from(e.touches).find((currentTouch) => currentTouch.identifier === activeTouchId);
         if (!touch) return;
 
-        const point = findSlotPointFromElement(document.elementFromPoint(touch.clientX, touch.clientY));
-        if (!point) return;
-
-        const currentPoint = selectionStateRef.current.selectionCurrentPoint;
-        if (currentPoint &&
-            currentPoint.dateIndex === point.dateIndex &&
-            currentPoint.timeIndex === point.timeIndex) {
-            return;
-        }
-
         e.preventDefault();
-        setDragStarted(true);
-        setSelectionCurrentPoint(point);
-        setTouchActiveCell(point);
+        touchClientPointRef.current = {
+            clientX: touch.clientX,
+            clientY: touch.clientY,
+        };
+        updateTouchSelectionPoint(touch.clientX, touch.clientY);
+        autoScrollVelocityRef.current = getAutoScrollVelocity(touch.clientX, touch.clientY);
+
+        if (autoScrollVelocityRef.current.x !== 0 || autoScrollVelocityRef.current.y !== 0) {
+            startAutoScroll();
+        } else {
+            stopAutoScroll();
+        }
     };
 
     const handleGlobalTouchEnd = (e: TouchEvent) => {
@@ -676,12 +867,19 @@ export default function SchedulePage() {
                             </div>
                             
                             <div className="md:hidden rounded-xl bg-[var(--secondary)] px-4 py-3 text-sm text-[var(--foreground-muted)]">
-                                マスはタップ/ドラッグでそのまま選択できます。スクロールしたい時は上の日付帯か左の時刻帯をドラッグしてください。
+                                マスはタップ/ドラッグでそのまま選択でき、端まで引くと自動でスクロールします。移動したい時は上の日付帯・左の時刻帯、または表の上で2本指スクロールを使ってください。
                             </div>
                         </div>
 
                         <div className="surface-card mb-4 p-3 md:p-4">
-                        <div className={`calendar-container ${isTouchSelecting ? 'touch-selecting' : ''}`}>
+                        <div
+                            ref={calendarContainerRef}
+                            className={`calendar-container ${isTouchSelecting ? 'touch-selecting' : ''}`}
+                            onTouchStart={handleCalendarTouchStart}
+                            onTouchMove={handleCalendarTouchMove}
+                            onTouchEnd={handleCalendarTouchEnd}
+                            onTouchCancel={handleCalendarTouchEnd}
+                        >
                             <div
                                 className="calendar-grid"
                                 style={{

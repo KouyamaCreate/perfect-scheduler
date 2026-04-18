@@ -70,6 +70,7 @@ function ScheduleDemoContent() {
     const highlightedParticipant = highlightedParticipantId
         ? participants.find((participant) => participant.id === highlightedParticipantId) ?? null
         : null;
+    const showResponses = false;
 
     useEffect(() => {
         if (highlightedParticipantId && !participants.some((participant) => participant.id === highlightedParticipantId)) {
@@ -131,18 +132,22 @@ function ScheduleDemoContent() {
         return slotIds;
     };
 
-    const toggleSlotsFromBaseSelection = (baseSlots: string[], toggledSlotIds: string[]) => {
-        const toggledSlotIdSet = new Set(toggledSlotIds);
-        const nextSelectedSlots = baseSlots.filter(slotId => !toggledSlotIdSet.has(slotId));
-        const baseSlotIdSet = new Set(baseSlots);
+    const applyAreaSelectionFromBase = (baseSlots: string[], areaSlotIds: string[], shouldAdd: boolean) => {
+        const areaSlotIdSet = new Set(areaSlotIds);
 
-        toggledSlotIds.forEach(slotId => {
-            if (!baseSlotIdSet.has(slotId)) {
-                nextSelectedSlots.push(slotId);
-            }
-        });
+        if (shouldAdd) {
+            const nextSelectedSlots = [...baseSlots];
 
-        return nextSelectedSlots;
+            areaSlotIds.forEach(slotId => {
+                if (!nextSelectedSlots.includes(slotId)) {
+                    nextSelectedSlots.push(slotId);
+                }
+            });
+
+            return nextSelectedSlots;
+        }
+
+        return baseSlots.filter(slotId => !areaSlotIdSet.has(slotId));
     };
 
     // 参加者を追加する
@@ -395,8 +400,8 @@ function ScheduleDemoContent() {
         }
 
         const areaSlotIds = getAreaSlotIds(selectionStartPoint, selectionCurrentPoint);
-        setSelectedSlots(toggleSlotsFromBaseSelection(selectionBaseSlots, areaSlotIds));
-    }, [dragStarted, isSelecting, selectionBaseSlots, selectionCurrentPoint, selectionStartPoint, selectionType]);
+        setSelectedSlots(applyAreaSelectionFromBase(selectionBaseSlots, areaSlotIds, isAdding));
+    }, [dragStarted, isAdding, isSelecting, selectionBaseSlots, selectionCurrentPoint, selectionStartPoint, selectionType]);
 
     // 選択状態に基づいて表示を更新（選択中の範囲を含む）
     const getCellStatus = (dateIndex: number, timeIndex: number) => {
@@ -420,9 +425,7 @@ function ScheduleDemoContent() {
             if (dateIndex >= startDateIndex && dateIndex <= endDateIndex &&
                 timeIndex >= startTimeIndex && timeIndex <= endTimeIndex) {
                 isInActiveSelection = true;
-                activeSelectionClass = selectionBaseSlots.includes(slotId)
-                    ? 'active-deselecting'
-                    : 'active-selecting';
+                activeSelectionClass = isAdding ? 'active-selecting' : 'active-deselecting';
             }
         }
 
@@ -480,8 +483,8 @@ function ScheduleDemoContent() {
                                 </span>
                             )}
                             <span className="status-pill">{startTime} - {endTime}</span>
-                            <span className="status-pill">{participants.length}人が回答中</span>
-                            {highlightedParticipant && (
+                            {showResponses && <span className="status-pill">{participants.length}人が回答中</span>}
+                            {showResponses && highlightedParticipant && (
                                 <span className="status-pill border-[#aac8ff] bg-[var(--primary-soft)] text-[var(--primary)]">
                                     {highlightedParticipant.name}を強調表示中
                                 </span>
@@ -563,7 +566,7 @@ function ScheduleDemoContent() {
                                     {dates.map((_, dateIndex) => {
                                         const slotId = getSlotId(dateIndex, timeIndex);
                                         const { isSelected, isInActiveSelection, activeSelectionClass, availability } = getCellStatus(dateIndex, timeIndex);
-                                        const isHighlightedParticipantSlot = highlightedParticipant?.slots.includes(slotId) ?? false;
+                                        const isHighlightedParticipantSlot = showResponses && (highlightedParticipant?.slots.includes(slotId) ?? false);
 
                                         const cellClassName = `
                                             time-slot 
@@ -572,13 +575,13 @@ function ScheduleDemoContent() {
                                             border-[var(--border)] 
                                             ${isSelected ? 'selected' : ''} 
                                             ${isInActiveSelection && dragStarted ? activeSelectionClass : ''}
-                                            ${availability > 0 ? (availability === participants.length ? 'available' : 'partially') : ''}
+                                            ${showResponses && availability > 0 ? (availability === participants.length ? 'available' : 'partially') : ''}
                                             relative
                                         `;
 
                                         // 参加可能人数に応じた色を計算
                                         let availabilityColor = '';
-                                        if (availability > 0 && !isSelected && !isInActiveSelection) {
+                                        if (showResponses && availability > 0 && !isSelected && !isInActiveSelection) {
                                             // 最大5段階のグラデーション
                                             const maxSteps = Math.min(5, participants.length);
 
@@ -638,7 +641,7 @@ function ScheduleDemoContent() {
                                                         : undefined
                                                 }}
                                             >
-                                                {availability > 0 && (
+                                                {showResponses && availability > 0 && (
                                                     <div className="absolute inset-0 flex items-center justify-center text-xs font-bold">
                                                         {availability}
                                                     </div>
@@ -657,6 +660,7 @@ function ScheduleDemoContent() {
                                 <div className="h-4 w-4 rounded-sm bg-[var(--primary)]"></div>
                                 <span className="text-sm text-[var(--foreground-muted)]">あなたの選択</span>
                             </div>
+                            {showResponses && (
                             <div className="flex items-center gap-2">
                                 <div className="h-4 w-4 rounded-sm" style={{ backgroundColor: maxColor }}></div>
                                 <span className="text-sm text-[var(--foreground-muted)]">重なりが大きい候補</span>
@@ -668,12 +672,16 @@ function ScheduleDemoContent() {
                                     title="最大参加時の色を選択"
                                 />
                             </div>
+                            )}
+                            {showResponses && (
                             <div className="flex items-center gap-2">
                                 <div className="h-4 w-10 rounded-sm bg-gradient-to-r" style={{
                                     backgroundImage: `linear-gradient(to right, ${minColor}, ${maxColor})`
                                 }}></div>
                                 <span className="text-sm text-[var(--foreground-muted)]">青の濃淡で重なりを表示</span>
                             </div>
+                            )}
+                            {showResponses && (
                             <div className="flex items-center gap-2">
                                 <div className="h-4 w-4 rounded-sm" style={{ backgroundColor: minColor }}></div>
                                 <span className="text-sm text-[var(--foreground-muted)]">重なりが小さい候補</span>
@@ -685,11 +693,14 @@ function ScheduleDemoContent() {
                                     title="最小参加時の色を選択"
                                 />
                             </div>
+                            )}
+                            {showResponses && (
                             <div className="flex items-center gap-2">
                                 <div className="h-4 w-4 rounded-sm bg-[#ebf3ff]"></div>
                                 <span className="text-sm text-[var(--foreground-muted)]">その他の候補</span>
                             </div>
-                            {highlightedParticipant && (
+                            )}
+                            {showResponses && highlightedParticipant && (
                                 <div className="flex items-center gap-2">
                                     <div
                                         className="h-4 w-4 rounded-sm bg-white"
@@ -767,6 +778,7 @@ function ScheduleDemoContent() {
                             </div>
                         </div>
 
+                        {showResponses && (
                         <div className="surface-card p-5">
                             <h2 className="mb-4 text-xl font-bold text-[var(--foreground)]">参加者一覧 ({participants.length})</h2>
                             {participants.length > 0 ? (
@@ -813,6 +825,7 @@ function ScheduleDemoContent() {
                                 <p className="text-[var(--foreground-muted)]">まだ参加者はいません</p>
                             )}
                         </div>
+                        )}
                     </div>
                 </div>
             </main>

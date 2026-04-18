@@ -126,7 +126,7 @@ describe('SchedulePage', () => {
     });
 
     test('スケジュールページが正しくレンダリングされること', async () => {
-        render(<SchedulePage />);
+        const { container } = render(<SchedulePage />);
 
         // ローディング表示が最初に表示されることを確認
         expect(screen.getByText(/読み込み中/i)).toBeInTheDocument();
@@ -137,11 +137,35 @@ describe('SchedulePage', () => {
             expect(screen.getByText('テスト用の説明')).toBeInTheDocument();
         });
 
-        // 参加者情報が表示されることを確認
+        await waitFor(() => {
+            expect(screen.queryByText('テスト参加者1')).not.toBeInTheDocument();
+            expect(screen.queryByText('テスト参加者2')).not.toBeInTheDocument();
+            expect(screen.queryByText(/参加者一覧/)).not.toBeInTheDocument();
+            expect(screen.queryByText(/重なりが大きい候補/)).not.toBeInTheDocument();
+        });
+
+        const overlappingCell = getCell(container, 0, 0);
+        expect(overlappingCell).not.toHaveTextContent('2');
+    });
+
+    test('登録後の閲覧画面では他の参加者の回答が表示されること', async () => {
+        (useSearchParams as jest.Mock).mockReturnValue({
+            get: jest.fn((key: string) => (key === 'mode' ? 'view' : null)),
+        });
+
+        const { container } = render(<SchedulePage />);
+
+        await waitForScheduleToLoad();
+
         await waitFor(() => {
             expect(screen.getByText('テスト参加者1')).toBeInTheDocument();
             expect(screen.getByText('テスト参加者2')).toBeInTheDocument();
+            expect(screen.getByText(/参加者一覧 \(2\)/)).toBeInTheDocument();
+            expect(screen.getByText(/重なりが大きい候補/)).toBeInTheDocument();
         });
+
+        const overlappingCell = getCell(container, 0, 0);
+        expect(overlappingCell).toHaveTextContent('2');
     });
 
     test('参加情報を登録できること', async () => {
@@ -202,7 +226,7 @@ describe('SchedulePage', () => {
         });
     });
 
-    test('範囲選択は開始マスに関係なく範囲内の状態を反転すること', async () => {
+    test('範囲選択は開始マスが未選択なら範囲全体を追加すること', async () => {
         const { container } = render(<SchedulePage />);
 
         await waitForScheduleToLoad();
@@ -222,13 +246,46 @@ describe('SchedulePage', () => {
 
         await waitFor(() => {
             expect(unselectedCell).toHaveClass('selected');
-            expect(selectedCell).not.toHaveClass('selected');
+            expect(selectedCell).toHaveClass('selected');
         });
 
         fireEvent.mouseUp(window);
 
         await waitFor(() => {
-            expect(screen.getByText(/選択済み時間枠:\s*1/)).toBeInTheDocument();
+            expect(screen.getByText(/選択済み時間枠:\s*2/)).toBeInTheDocument();
+        });
+    });
+
+    test('範囲選択は開始マスが選択済みなら範囲内の選択を解除すること', async () => {
+        const { container } = render(<SchedulePage />);
+
+        await waitForScheduleToLoad();
+
+        const firstCell = getCell(container, 0, 0);
+        const secondCell = getCell(container, 1, 0);
+
+        fireEvent.mouseDown(firstCell);
+        fireEvent.mouseUp(window);
+        fireEvent.mouseDown(secondCell);
+        fireEvent.mouseUp(window);
+
+        await waitFor(() => {
+            expect(firstCell).toHaveClass('selected');
+            expect(secondCell).toHaveClass('selected');
+        });
+
+        fireEvent.mouseDown(firstCell);
+        fireEvent.mouseEnter(secondCell);
+
+        await waitFor(() => {
+            expect(firstCell).not.toHaveClass('selected');
+            expect(secondCell).not.toHaveClass('selected');
+        });
+
+        fireEvent.mouseUp(window);
+
+        await waitFor(() => {
+            expect(screen.getByText(/選択済み時間枠:\s*0/)).toBeInTheDocument();
         });
     });
 

@@ -41,6 +41,8 @@ export default function SchedulePage() {
     const [username, setUsername] = useState('');
     const [selectedSlots, setSelectedSlots] = useState<string[]>([]);
     const [slotsInitialized, setSlotsInitialized] = useState(false);
+    const [participantsLoaded, setParticipantsLoaded] = useState(false);
+    const usernameInitializedRef = useRef(false);
     const [participants, setParticipants] = useState<{ id: string; name: string; slots: string[] }[]>([]);
     const [highlightedParticipantId, setHighlightedParticipantId] = useState<string | null>(null);
     const [shareLink, setShareLink] = useState('');
@@ -108,26 +110,23 @@ export default function SchedulePage() {
         }
     }, [authLoading, user, signInAnonymously]);
 
-    // ユーザー名と選択済みスロットの初期化（既存参加者なら固定＆引き継ぎ）
+    // ユーザー名と選択済みスロットの初期化（参加者データ取得後に一度だけ実行）
     useEffect(() => {
-        if (!user) return;
+        if (!user || !participantsLoaded || usernameInitializedRef.current) return;
+        usernameInitializedRef.current = true;
+
         const me = participants.find((p) => p.id === user.uid);
-        if (me) {
-            if (me.name && username !== me.name) {
-                setUsername(me.name);
-            }
-            // 以前の選択を今回の入力に反映（初回のみ or 未選択時）
-            if (!slotsInitialized && selectedSlots.length === 0 && me.slots && me.slots.length > 0) {
-                setSelectedSlots(me.slots);
-                setSlotsInitialized(true);
-            }
-            return;
-        }
-        if (!username) {
-            // 初回は表示名を初期値としてセット
+        if (me?.name) {
+            setUsername(me.name);
+        } else {
             setUsername(getUserDisplayName(user));
         }
-    }, [user, username, participants, slotsInitialized, selectedSlots.length]);
+        if (me?.slots && me.slots.length > 0 && selectedSlots.length === 0 && !slotsInitialized) {
+            setSelectedSlots(me.slots);
+            setSlotsInitialized(true);
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [user, participantsLoaded, participants]);
 
     // スケジュールデータの取得
     useEffect(() => {
@@ -206,6 +205,7 @@ export default function SchedulePage() {
                 });
             });
             setParticipants(Array.from(byUid.values()));
+            setParticipantsLoaded(true);
         }, (err) => {
             console.error('Error getting participants:', err);
         });
@@ -691,15 +691,13 @@ export default function SchedulePage() {
             // ドキュメントIDを user.uid に固定し、同一ユーザーを一意化
             const participantRef = doc(db, 'schedules', scheduleId, 'participants', user.uid);
 
-            // 既存ドキュメントがあればその氏名を維持（固定）
             const existingSnap = await getDoc(participantRef);
-            const fixedName = existingSnap.exists() ? (existingSnap.data().name as string) : username;
 
             await setDoc(
                 participantRef,
                 {
                     userId: user.uid,
-                    name: fixedName,
+                    name: username,
                     slots: [...selectedSlots],
                     createdAt: existingSnap.exists() ? existingSnap.data().createdAt ?? new Date() : new Date(),
                     updatedAt: new Date(),
@@ -1314,15 +1312,10 @@ export default function SchedulePage() {
                                         id="username"
                                         value={username}
                                         onChange={(e) => setUsername(e.target.value)}
-                                        disabled={Boolean(user?.uid && participants.find(p => p.id === user?.uid))}
-                                        className={`input ${Boolean(user?.uid && participants.find(p => p.id === user?.uid)) ? 'bg-[#f7f5f5] text-[var(--foreground-subtle)] cursor-not-allowed' : ''}`}
-                                        title={Boolean(user?.uid && participants.find(p => p.id === user?.uid)) ? 'このイベントでは氏名は固定されています' : undefined}
+                                        className="input"
                                         placeholder="名前を入力"
                                         required
                                     />
-                                    {Boolean(user?.uid && participants.find(p => p.id === user?.uid)) && (
-                                        <p className="mt-1 text-sm text-[var(--foreground-muted)]">このイベントでは氏名は固定されています</p>
-                                    )}
                                 </div>
 
                                 <div className="mb-4">
